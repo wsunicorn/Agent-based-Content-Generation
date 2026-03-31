@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ job.title|truncatechars:60 }} — AI Content Pipeline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+  <style>
+    :root {
+      --bg:         #0d0f14;
+      --surface:    #13161e;
+      --surface-2:  #1a1e2b;
+      --surface-3:  #222738;
+      --border:     rgba(255,255,255,.07);
+      --border-2:   rgba(255,255,255,.15);
+      --text:       #e2e4eb;
+      --text-2:     #8b90a4;
+      --text-3:     #555d72;
+      --accent:     #7c6cf8;
+      --accent-2:   #5eead4;
+      --accent-3:   #f472b6;
+      --accent-4:   #a78bfa;
+      --green:      #22d3a4;
+      --red:        #f25d5d;
+      --yellow:     #f8b84e;
+      --radius:     16px;
+      --radius-sm:  10px;
+      --shadow:     0 4px 24px rgba(0,0,0,.45);
+      --glow:       0 0 0 1px rgba(124,108,248,.25), 0 4px 24px rgba(124,108,248,.15);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(124,108,248,.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 85% 90%,  rgba(94,234,212,.08) 0%, transparent 55%);
+      pointer-events: none;
+    }
+
+    /* ── Nav bar ── */
+    .topbar {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,15,20,.92);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .topbar-logo {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, #7c6cf8, #5eead4);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(124,108,248,.4), 0 6px 18px rgba(124,108,248,.22);
+    }
+    .topbar-title { font-size: .85rem; font-weight: 700; color: var(--text); }
+    .topbar-sub   { font-size: .72rem; color: var(--text-3); }
+    .topbar-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text-2);
+      font-size: .8rem; font-weight: 600;
+      text-decoration: none;
+      transition: all .2s;
+    }
+    .topbar-back:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-2); }
+
+    /* ── Page wrapper ── */
+    .page { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
+
+    /* ── Meta header ── */
+    .article-meta {
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .meta-chips { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 12px;
+      border-radius: 99px;
+      font-size: .72rem; font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--surface-3);
+      color: var(--text-2);
+    }
+    .chip.status-done  { color: var(--green); background: rgba(45,212,191,.1); border-color: rgba(45,212,191,.3); }
+    .chip.status-fail  { color: var(--red);   background: rgba(242,93,93,.1);  border-color: rgba(242,93,93,.3);  }
+    .chip.type-chip    { color: var(--accent); background: rgba(124,108,248,.1); border-color: rgba(124,108,248,.3); }
+
+    .article-title {
+      font-size: 2rem; font-weight: 800;
+      letter-spacing: -.03em;
+      line-height: 1.25;
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+
+    .stats-band { display: flex; gap: 20px; flex-wrap: wrap; }
+    .stat-item { font-size: .78rem; color: var(--text-3); display: flex; align-items: center; gap: 5px; }
+    .stat-item strong { color: var(--text-2); }
+
+    /* ── Score ring ── */
+    .qa-ring-wrap {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin: 20px 0 0;
+      width: fit-content;
+    }
+    .qa-ring-number { font-size: 2rem; font-weight: 800; letter-spacing: -.04em; }
+    .qa-ring-number.good { color: var(--green); }
+    .qa-ring-number.ok   { color: var(--accent); }
+    .qa-ring-number.poor { color: var(--yellow); }
+    .qa-ring-label { font-size: .72rem; color: var(--text-3); }
+
+    /* ── Export bar ── */
+    .export-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin: 24px 0;
+      padding: 16px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .export-label { font-size: .72rem; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .07em; margin-right: 4px; }
+    .btn-export {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 7px 16px;
+      border-radius: var(--radius-sm);
+      font-size: .78rem; font-weight: 600; font-family: inherit;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text-2);
+      cursor: pointer; text-decoration: none;
+      transition: all .18s;
+    }
+    .btn-export:hover { background: var(--surface-3); color: var(--text); border-color: rgba(255,255,255,.15); transform: translateY(-1px); }
+    .btn-export.md   { border-color: rgba(94,234,212,.3); color: var(--accent-2); }
+    .btn-export.html { border-color: rgba(244,114,182,.3); color: var(--accent-3); }
+    .btn-export.docx { border-color: rgba(124,108,248,.3); color: var(--accent); }
+
+    /* ── Tabs ── */
+    .tab-bar {
+      display: flex; gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+    .tab-btn {
+      padding: 10px 20px;
+      border: none; background: none;
+      font-family: inherit; font-size: .82rem; font-weight: 600;
+      color: var(--text-3);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all .18s;
+    }
+    .tab-btn:hover { color: var(--text-2); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Article body (rendered markdown) ── */
+    .article-body {
+      font-family: 'Merriweather', Georgia, serif;
+      font-size: .97rem;
+      line-height: 1.9;
+      color: #c2c4d4;
+    }
+    .article-body h1, .article-body h2, .article-body h3, .article-body h4 {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-weight: 700;
+      color: var(--text);
+      margin: 1.8em 0 .7em;
+      letter-spacing: -.02em;
+    }
+    .article-body h1 { font-size: 1.6rem; }
+    .article-body h2 { font-size: 1.3rem; border-bottom: 1px solid var(--border); padding-bottom: .4em; }
+    .article-body h3 { font-size: 1.1rem; color: var(--accent); }
+    .article-body h4 { font-size: .95rem; color: var(--text-2); }
+    .article-body p  { margin-bottom: 1.1em; }
+    .article-body ul, .article-body ol { margin: 0 0 1em 1.5em; }
+    .article-body li { margin-bottom: .4em; }
+    .article-body strong { color: var(--text); font-weight: 700; }
+    .article-body em { color: var(--text-2); }
+    .article-body code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .85em;
+      background: rgba(124,108,248,.1);
+      border: 1px solid rgba(124,108,248,.2);
+      border-radius: 4px;
+      padding: 2px 6px;
+      color: var(--accent);
+    }
+    .article-body pre {
+      background: rgba(0,0,0,.35);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin-bottom: 1.2em;
+    }
+    .article-body pre code { background: none; border: none; padding: 0; font-size: .82rem; color: var(--accent-4); }
+    .article-body blockquote {
+      border-left: 3px solid var(--accent-2);
+      padding: .6em 1.2em;
+      margin: 1em 0;
+      background: rgba(124,108,248,.06);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      color: var(--text-2);
+      font-style: italic;
+    }
+    .article-body hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+    .article-body a { color: var(--accent-3); text-underline-offset: 3px; }
+    .article-body a:hover { color: var(--accent); }
+
+    /* ── Raw / SEO tabs ── */
+    .raw-view {
+      background: rgba(0,0,0,.35);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 20px 22px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .82rem;
+      line-height: 1.75;
+      color: var(--text-2);
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-y: auto;
+    }
+    .seo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 600px) { .seo-grid { grid-template-columns: 1fr; } }
+    .seo-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px 18px;
+    }
+    .seo-box-label { font-size: .68rem; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 8px; }
+    .seo-box-val { font-size: .88rem; color: var(--text); line-height: 1.6; }
+    .kw-chip {
+      display: inline-flex; padding: 3px 10px;
+      background: rgba(124,108,248,.1); border: 1px solid rgba(124,108,248,.22);
+      border-radius: 99px; font-size: .72rem; color: var(--accent);
+      margin: 3px 2px;
+    }
+
+    /* ── QA details ── */
+    .qa-criterion {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      margin-bottom: 8px;
+    }
+    .qa-crit-name { flex: 1; font-size: .82rem; }
+    .qa-crit-score { font-weight: 700; font-size: .95rem; }
+    .qa-crit-score.high { color: var(--green); }
+    .qa-crit-score.mid  { color: var(--accent); }
+    .qa-crit-score.low  { color: var(--yellow); }
+
+    .spinner-wrap { text-align: center; padding: 60px; color: var(--text-3); }
+    @keyframes spin2 { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 32px; height: 32px; margin: 0 auto 14px;
+      border: 3px solid rgba(124,108,248,.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin2 .8s linear infinite;
+    }
+
+    /* ══════════════════════════════════════════════════
+       Light theme override
+    ══════════════════════════════════════════════════ */
+    [data-theme="light"] {
+      --bg:       #f5f6fb;
+      --surface:  #ffffff;
+      --surface-2:#eef1f8;
+      --surface-3:#e2e6f3;
+      --border:   rgba(0,0,0,.10);
+      --border-2: rgba(108,92,231,.30);
+      --text:     #1a1d2e;
+      --text-2:   #4e5373;
+      --text-3:   #8890ad;
+      --accent:   #6c5ce7;
+      --accent-2: #00a896;
+      --accent-3: #d63fa0;
+      --accent-4: #7c6cf8;
+      --green:    #0d9488;
+      --red:      #dc2626;
+      --yellow:   #b45309;
+      --shadow:   0 2px 16px rgba(0,0,0,.1);
+      --glow:     0 0 0 1px rgba(108,92,231,.18), 0 4px 16px rgba(108,92,231,.08);
+    }
+    [data-theme="light"] body::before { opacity: 0.25; }
+    [data-theme="light"] .topbar { background: rgba(255,255,255,.96); }
+    [data-theme="light"] .article-body { color: #2d3452; }
+    [data-theme="light"] .article-body h1,
+    [data-theme="light"] .article-body h2,
+    [data-theme="light"] .article-body h3 { color: #1a1d2e; }
+    [data-theme="light"] .article-title { color: #1a1d2e; }
+    [data-theme="light"] .article-body blockquote { background: rgba(108,92,231,.05); }
+    [data-theme="light"] .article-body code { background: rgba(108,92,231,.07); border-color: rgba(108,92,231,.18); color: #d63fa0; }
+    [data-theme="light"] .article-body pre code { color: #4e5373; }
+    [data-theme="light"] .raw-view { background: #eef1f8; color: #4e5373; border-color: rgba(0,0,0,.1); }
+    [data-theme="light"] .seo-box { background: var(--surface-2); border-color: rgba(0,0,0,.09); }
+    [data-theme="light"] .qa-criterion { background: var(--surface-2); border-color: rgba(0,0,0,.09); }
+    [data-theme="light"] .tab-btn { color: #8890ad; }
+    [data-theme="light"] .tab-btn:hover { color: #4e5373; }
+    [data-theme="light"] .tab-btn.active { color: #6c5ce7; border-bottom-color: #6c5ce7; }
+    [data-theme="light"] .kw-chip { background: rgba(108,92,231,.08); border-color: rgba(108,92,231,.2); }
+    [data-theme="light"] .chip.type-chip { background: rgba(108,92,231,.1); border-color: rgba(108,92,231,.3); }
+
+    /* Theme toggle button */
+    .theme-toggle {
+      margin-left: auto;
+      width: 32px; height: 32px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text-2);
+      cursor: pointer; font-size: 15px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .18s; flex-shrink: 0;
+    }
+    .theme-toggle:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-2); }
+
+    /* Smooth transitions */
+    body, .topbar, .article-body, .raw-view, .seo-box, .qa-criterion, .export-bar, .btn-export {
+      transition: background .22s, border-color .22s, color .22s;
+    }
+  </style>
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-logo">🤖</div>
+  <div>
+    <div class="topbar-title">AI Content Pipeline</div>
+    <div class="topbar-sub">Article Viewer</div>
+  </div>
+  <button id="theme-toggle-btn" class="theme-toggle" title="Switch light / dark">☀️</button>
+  <a href="/" class="topbar-back">← Dashboard</a>
+</nav>
+
+<div class="page">
+
+  <!-- Meta header -->
+  <div class="article-meta">
+    <div class="meta-chips">
+      <span class="chip type-chip">{{ job.content_type|title|cut:"_" }}</span>
+      <span class="chip {% if job.status == 'completed' %}status-done{% elif job.status == 'failed' %}status-fail{% endif %}">
+        {{ job.status|upper }}
+      </span>
+      {% if job.language %}<span class="chip">🌐 {{ job.language }}</span>{% endif %}
+      <span class="chip">{{ job.created_at|date:"M d, Y · H:i" }}</span>
+    </div>
+    <h1 class="article-title">{{ job.title }}</h1>
+    <div class="stats-band">
+      <div class="stat-item">📝 <strong id="word-count-val">—</strong> words</div>
+      <div class="stat-item">🤖 <strong>{{ job.llm_calls_count }}</strong> LLM calls</div>
+      {% if job.duration_seconds %}<div class="stat-item">⏱ <strong>{{ job.duration_seconds|floatformat:0 }}s</strong></div>{% endif %}
+      <div class="stat-item">🔑 <strong>{{ job.keywords|join:", "|default:"—" }}</strong></div>
+    </div>
+    <div class="qa-ring-wrap" id="qa-ring-wrap" style="display:none;">
+      <div class="qa-ring-number" id="qa-ring-num">—</div>
+      <div>
+        <div style="font-size:.75rem;font-weight:700;color:var(--text-2);">QA Score</div>
+        <div class="qa-ring-label">out of 100</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export bar -->
+  <div class="export-bar">
+    <span class="export-label">Export as</span>
+    <button class="btn-export md"   onclick="downloadExport('markdown')">⬇ Markdown</button>
+    <button class="btn-export html" onclick="downloadExport('html')">⬇ HTML</button>
+    <button class="btn-export docx" onclick="downloadExport('docx')">⬇ DOCX</button>
+    <a style="margin-left:auto;" href="/admin/jobs/job/{{ job.id }}/change/" target="_blank"
+       class="btn-export">Admin ↗</a>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="article">📄 Article</button>
+    <button class="tab-btn" data-tab="seo">📈 SEO</button>
+    <button class="tab-btn" data-tab="qa">✅ QA Report</button>
+    <button class="tab-btn" data-tab="raw">{ } Raw</button>
+  </div>
+
+  <!-- Tab: Article -->
+  <div class="tab-panel active" id="tab-article">
+    <div id="article-spinner" class="spinner-wrap">
+      <div class="spinner"></div>
+      Loading article…
+    </div>
+    <div class="article-body" id="article-body" style="display:none;"></div>
+  </div>
+
+  <!-- Tab: SEO -->
+  <div class="tab-panel" id="tab-seo">
+    <div id="seo-spinner" class="spinner-wrap"><div class="spinner"></div>Loading…</div>
+    <div id="seo-content" style="display:none;"></div>
+  </div>
+
+  <!-- Tab: QA -->
+  <div class="tab-panel" id="tab-qa">
+    <div id="qa-spinner" class="spinner-wrap"><div class="spinner"></div>Loading…</div>
+    <div id="qa-content" style="display:none;"></div>
+  </div>
+
+  <!-- Tab: Raw -->
+  <div class="tab-panel" id="tab-raw">
+    <div id="raw-spinner" class="spinner-wrap"><div class="spinner"></div>Loading…</div>
+    <pre class="raw-view" id="raw-content" style="display:none;"></pre>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+const JOB_ID = '{{ job.id }}';
+
+/* ── Tab switching ── */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ── Markdown → HTML (simple, no dependency) ── */
+function mdToHtml(md) {
+  if (!md) return '<p style="color:var(--text-3)">No content available.</p>';
+  let html = md
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    // headings
+    .replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
+    .replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
+    .replace(/^####\s+(.+)$/gm,  '<h4>$1</h4>')
+    .replace(/^###\s+(.+)$/gm,   '<h3>$1</h3>')
+    .replace(/^##\s+(.+)$/gm,    '<h2>$1</h2>')
+    .replace(/^#\s+(.+)$/gm,     '<h1>$1</h1>')
+    // hr
+    .replace(/^[-*_]{3,}\s*$/gm, '<hr>')
+    // blockquote
+    .replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+    // code blocks
+    .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+    // inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // bold+italic
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    // bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // italic
+    .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+    // links
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // lists
+  const lines = html.split('\n');
+  const out = [];
+  let inUL = false, inOL = false;
+  for (const line of lines) {
+    const ul = /^[-*+]\s+(.+)/.exec(line);
+    const ol = /^\d+\.\s+(.+)/.exec(line);
+    if (ul) {
+      if (!inUL) { out.push('<ul>'); inUL = true; }
+      out.push('<li>' + ul[1] + '</li>');
+    } else if (ol) {
+      if (!inOL) { out.push('<ol>'); inOL = true; }
+      out.push('<li>' + ol[1] + '</li>');
+    } else {
+      if (inUL) { out.push('</ul>'); inUL = false; }
+      if (inOL) { out.push('</ol>'); inOL = false; }
+      out.push(line);
+    }
+  }
+  if (inUL) out.push('</ul>');
+  if (inOL) out.push('</ol>');
+  html = out.join('\n');
+
+  // paragraphs — wrap double-newline blocks
+  html = html.replace(/(?<![>\n])\n{2,}(?![\s<])/g, '\n\n')
+             .split(/\n{2,}/)
+             .map(b => b.trim())
+             .filter(Boolean)
+             .map(b => /^<[h1-6ulolprebh]/.test(b) ? b : '<p>' + b.replace(/\n/g,'<br>') + '</p>')
+             .join('\n');
+
+  return html;
+}
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ── Load article content ── */
+async function loadArticle() {
+  try {
+    const r = await fetch('/api/jobs/' + JOB_ID + '/artifacts/final_content/');
+    document.getElementById('article-spinner').style.display = 'none';
+    if (r.ok) {
+      const art = await r.json();
+      const body = document.getElementById('article-body');
+      body.innerHTML = mdToHtml(art.content_text || '');
+      body.style.display = 'block';
+      if (art.word_count) document.getElementById('word-count-val').textContent = art.word_count.toLocaleString();
+      document.getElementById('raw-content').textContent = art.content_text || '';
+    } else {
+      document.getElementById('article-body').innerHTML =
+        '<p style="color:var(--text-3)">Content not available yet, or pipeline is still running.</p>';
+      document.getElementById('article-body').style.display = 'block';
+    }
+    document.getElementById('raw-spinner').style.display = 'none';
+    document.getElementById('raw-content').style.display = 'block';
+  } catch {
+    document.getElementById('article-spinner').innerHTML = '<p style="color:var(--text-3)">Error loading content.</p>';
+  }
+}
+
+/* ── Load QA ── */
+async function loadQA() {
+  try {
+    const r = await fetch('/api/jobs/' + JOB_ID + '/artifacts/qa_report/');
+    document.getElementById('qa-spinner').style.display = 'none';
+    if (!r.ok) { document.getElementById('qa-content').innerHTML = '<p style="color:var(--text-3)">QA report not available.</p>'; document.getElementById('qa-content').style.display='block'; return; }
+    const art = await r.json();
+    const qa  = art.content_json || {};
+    const score = qa.overall_score;
+    if (score !== undefined) {
+      const el  = document.getElementById('qa-ring-num');
+      const cls = score >= 80 ? 'high good' : score >= 60 ? 'mid ok' : 'low';
+      el.textContent = score;
+      el.className   = 'qa-ring-number ' + (score>=80?'good':score>=60?'ok':'poor');
+      document.getElementById('qa-ring-wrap').style.display = 'flex';
+    }
+    const criteria = qa.criteria || {};
+    const issues   = qa.issues   || [];
+    const html = Object.entries(criteria).map(([name, val]) => {
+      const s   = typeof val === 'object' ? (val.score || 0) : val;
+      const cls = s >= 8 ? 'high' : s >= 5 ? 'mid' : 'low';
+      return '<div class="qa-criterion"><div class="qa-crit-name">' + esc(name.replace(/_/g,' ')) + '</div>'
+        + '<div class="qa-crit-score ' + cls + '">' + s + '/10</div></div>';
+    }).join('') +
+    (issues.length ? '<div style="margin-top:16px;font-size:.78rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Issues</div>'
+      + issues.map(i => '<div style="padding:8px 14px;margin-bottom:6px;background:rgba(242,93,93,.08);border:1px solid rgba(242,93,93,.2);border-radius:8px;font-size:.82rem;color:#fca5a5;">' + esc(i) + '</div>').join('')
+      : '<div style="margin-top:12px;color:var(--green);font-size:.82rem;">✓ No issues found</div>');
+    document.getElementById('qa-content').innerHTML = html;
+    document.getElementById('qa-content').style.display = 'block';
+  } catch { document.getElementById('qa-spinner').innerHTML = '<p style="color:var(--text-3)">Error.</p>'; }
+}
+
+/* ── Load SEO ── */
+async function loadSEO() {
+  try {
+    const r = await fetch('/api/jobs/' + JOB_ID + '/artifacts/seo_metadata/');
+    document.getElementById('seo-spinner').style.display = 'none';
+    if (!r.ok) { document.getElementById('seo-content').innerHTML = '<p style="color:var(--text-3)">SEO data not available.</p>'; document.getElementById('seo-content').style.display='block'; return; }
+    const art = await r.json();
+    const seo = art.content_json || {};
+    const kws = (seo.keywords || []).map(k => '<span class="kw-chip">' + esc(k) + '</span>').join('');
+    const html =
+      '<div class="seo-grid">'
+        + '<div class="seo-box"><div class="seo-box-label">Meta Title</div><div class="seo-box-val">' + esc(seo.meta_title||'—') + '</div></div>'
+        + '<div class="seo-box"><div class="seo-box-label">Slug</div><div class="seo-box-val" style="font-family:monospace;color:var(--accent);">' + esc(seo.slug||'—') + '</div></div>'
+        + '<div class="seo-box" style="grid-column:span 2"><div class="seo-box-label">Meta Description</div><div class="seo-box-val">' + esc(seo.meta_description||'—') + '</div></div>'
+        + (kws ? '<div class="seo-box" style="grid-column:span 2"><div class="seo-box-label">Keywords</div><div>' + kws + '</div></div>' : '')
+        + (seo.schema_markup ? '<div class="seo-box" style="grid-column:span 2"><div class="seo-box-label">Schema Markup</div><pre style="font-size:.75rem;color:var(--text-2);white-space:pre-wrap;word-break:break-word;">' + esc(JSON.stringify(seo.schema_markup,null,2)) + '</pre></div>' : '')
+      + '</div>';
+    document.getElementById('seo-content').innerHTML = html;
+    document.getElementById('seo-content').style.display = 'block';
+  } catch { document.getElementById('seo-spinner').innerHTML = '<p style="color:var(--text-3)">Error.</p>'; }
+}
+
+loadArticle();
+loadQA();
+loadSEO();
+
+/* ── JS-based export download ── */
+async function downloadExport(fmt) {
+  const extMap = { markdown: 'md', html: 'html', docx: 'docx' };
+  try {
+    const resp = await fetch('/api/jobs/' + JOB_ID + '/export/?type=' + fmt);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert('Export failed: ' + (err.detail || ('HTTP ' + resp.status)));
+      return;
+    }
+    const blob = await resp.blob();
+    const cd   = resp.headers.get('Content-Disposition') || '';
+    const fnMatch = cd.match(/filename="([^"]+)"/);
+    const filename = fnMatch ? fnMatch[1] : (JOB_ID + '.' + (extMap[fmt] || fmt));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch (err) {
+    alert('Export error: ' + err.message);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Theme toggle
+───────────────────────────────────────────────────────────────────────── */
+(function initTheme() {
+  const saved = localStorage.getItem('ai-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+})();
+document.getElementById('theme-toggle-btn').addEventListener('click', function() {
+  const cur  = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('ai-theme', next);
+  this.textContent = next === 'dark' ? '☀️' : '🌙';
+});
+</script>
+</body>
+</html>

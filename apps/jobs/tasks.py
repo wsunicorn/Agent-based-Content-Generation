@@ -1,0 +1,271 @@
+"""
+Celery tasks for the content pipeline.
+
+run_pipeline(job_id) is the main entry point — it:
+  1. Loads the Job record.
+  2. Builds a PipelineState from it.
+  3. Runs the LangGraph pipeline via graph.stream() (yields per-node output).
+  4. Pushes progress updates over Django Channels WebSocket after each node.
+  5. Saves artifacts (draft, SEO, QA report) and updates the Job status.
+"""
+from __future__ import annotations
+
+import dataclasses
+import logging
+
+from celery import shared_task
+from django.utils import timezone as dj_timezone
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket push helper
+# ---------------------------------------------------------------------------
+
+def push_progress(job_id: str, agent: str, status: str, detail: dict | None = None) -> None:
+    """Send a progress event to the job's WebSocket channel group."""
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            msg = {"type": "job_progress", "agent": agent, "status": status}
+            if detail:
+                msg["detail"] = detail
+            async_to_sync(channel_layer.group_send)(f"job_{job_id}", msg)
+    except Exception as exc:
+        logger.debug("WebSocket push failed (non-critical): %s", exc)
+
+
+def push_completed(job_id: str, qa_score: float) -> None:
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f"job_{job_id}",
+                {"type": "job_completed", "qa_score": qa_score},
+            )
+    except Exception as exc:
+        logger.debug("WebSocket push failed (non-critical): %s", exc)
+
+
+def push_error(job_id: str, message: str) -> None:
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f"job_{job_id}",
+                {"type": "job_error", "message": message},
+            )
+    except Exception as exc:
+        logger.debug("WebSocket push failed (non-critical): %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline task
+# ---------------------------------------------------------------------------
+
+@shared_task(bind=True, max_retries=0, ignore_result=False)
+def run_pipeline(self, job_id: str):
+    """Execute the full multi-agent pipeline for a job."""
+    from apps.jobs.models import Job
+    from apps.pipeline.graph import get_pipeline_graph
+    from apps.pipeline.state import PipelineState
+
+    try:
+        job = Job.objects.get(pk=job_id)
+    except Job.DoesNotExist:
+        logger.error("Job %s not found", job_id)
+        return {"error": "Job not found"}
+
+    # Mark job as running
+    job.status = Job.Status.RUNNING
+    job.started_at = dj_timezone.now()
+    job.save(update_fields=["status", "started_at"])
+
+    # Build initial state — combine language preference into additional_instructions
+    lang = getattr(job, "language", "") or "English"
+    base_instructions = job.additional_instructions or ""
+    lang_prefix = f"Language: Write the entire article in {lang}.\n" if lang and lang.lower() != "english" else ""
+    combined_instructions = (lang_prefix + base_instructions).strip()
+
+    state = PipelineState(
+        job_id=str(job.id),
+        topic=job.topic,
+        content_type=job.content_type,
+        target_length=job.target_length,
+        keywords=job.keywords or [],
+        additional_instructions=combined_instructions,
+    )
+
+    try:
+        graph = get_pipeline_graph()
+        initial = dataclasses.asdict(state)
+        final_state = dict(initial)
+
+        # Use stream() so we can push WebSocket progress after each node
+        for chunk in graph.stream(initial):
+            for node_name, node_output in chunk.items():
+                final_state.update(node_output)
+                # Build rich detail payload for the frontend
+                detail: dict = {}
+                if node_name == "research":
+                    raw_sources = node_output.get("sources", [])
+                    detail = {
+                        "sources_count": len(raw_sources),
+                        "sources": [
+                            {"title": s.get("title", ""), "url": s.get("url", "")}
+                            for s in raw_sources[:6]
+                            if isinstance(s, dict)
+                        ],
+                    }
+                elif node_name == "outline":
+                    sections = node_output.get("sections", [])
+                    detail = {"sections_count": len(sections)}
+                elif node_name == "writer":
+                    draft = node_output.get("draft", "") or ""
+                    detail = {"word_count": len(draft.split())}
+                elif node_name == "editor":
+                    edited = node_output.get("edited_draft", "") or ""
+                    detail = {"word_count": len(edited.split())}
+                elif node_name == "qa":
+                    qa = node_output.get("qa_report")
+                    if isinstance(qa, dict):
+                        detail = {"qa_score": qa.get("overall_score", 0)}
+                push_progress(job_id, node_name, "completed", detail or None)
+                logger.info("Node completed: %s (job=%s)", node_name, job_id)
+
+        # Reconstruct PipelineState from final dict
+        state = PipelineState.from_dict(final_state)
+
+        # Persist artifacts
+        _save_artifacts(job, state)
+
+        # Update job record
+        qa_score = state.qa_report.overall_score if state.qa_report else 0.0
+        job.status = Job.Status.COMPLETED
+        job.completed_at = dj_timezone.now()
+        job.llm_calls_count = state.llm_calls_total
+        job.llm_tokens_used = state.llm_tokens_total
+        job.error_message = ""
+        job.save(update_fields=[
+            "status", "completed_at", "llm_calls_count",
+            "llm_tokens_used", "error_message",
+        ])
+
+        push_completed(job_id, qa_score)
+        logger.info(
+            "Job %s completed — QA score=%.1f, LLM calls=%d",
+            job_id, qa_score, state.llm_calls_total,
+        )
+        return {"status": "completed", "job_id": job_id}
+
+    except Exception as exc:
+        from apps.agents.base import GeminiDailyQuotaExceeded
+
+        logger.exception("Job %s failed: %s", job_id, exc)
+        job.status = Job.Status.FAILED
+
+        if isinstance(exc, GeminiDailyQuotaExceeded):
+            user_message = (
+                "⛔ Gemini free-tier daily limit reached (20 req/day). "
+                "Quota resets at midnight Pacific Time (~UTC-8). "
+                "You can retry tomorrow or add billing at https://aistudio.google.com"
+            )
+        else:
+            user_message = str(exc)
+
+        job.error_message = user_message
+        job.completed_at = dj_timezone.now()
+        job.save(update_fields=["status", "error_message", "completed_at"])
+        push_error(job_id, user_message)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Helper: persist pipeline outputs as Artifact records
+# ---------------------------------------------------------------------------
+
+def _save_artifacts(job, state):
+    from apps.jobs.models import Artifact
+
+    artifacts_to_create = []
+
+    if state.research_summary:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.RESEARCH_SUMMARY,
+                content_text=state.research_summary,
+                content_json={"sources": [dataclasses.asdict(s) for s in state.sources]},
+                word_count=len(state.research_summary.split()),
+            )
+        )
+
+    if state.sections:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.OUTLINE,
+                content_json={"sections": [dataclasses.asdict(s) for s in state.sections]},
+            )
+        )
+
+    if state.draft:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.DRAFT,
+                content_text=state.draft,
+                word_count=len(state.draft.split()),
+            )
+        )
+
+    if state.edited_draft:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.EDITED_DRAFT,
+                content_text=state.edited_draft,
+                word_count=len(state.edited_draft.split()),
+            )
+        )
+
+    if state.final_content:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.FINAL_CONTENT,
+                content_text=state.final_content,
+                word_count=len(state.final_content.split()),
+            )
+        )
+
+    if state.seo_metadata:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.SEO_METADATA,
+                content_json=dataclasses.asdict(state.seo_metadata),
+            )
+        )
+
+    if state.qa_report:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.QA_REPORT,
+                content_json=dataclasses.asdict(state.qa_report),
+            )
+        )
+
+    if artifacts_to_create:
+        Artifact.objects.bulk_create(artifacts_to_create)
