@@ -122,7 +122,11 @@ def job_export(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    fmt = request.query_params.get("type", "markdown").lower()
+    fmt = (
+        request.query_params.get("type")
+        or request.query_params.get("format")
+        or "markdown"
+    ).lower()
     if fmt not in ("markdown", "html", "docx"):
         return Response(
             {"detail": "format must be one of: markdown, html, docx"},
@@ -388,6 +392,16 @@ def analytics_summary(request):
 
     # Total LLM calls
     total_llm_calls = jobs.aggregate(total=Sum("llm_calls_count"))["total"] or 0
+    llm_calls_by_provider = {}
+    for usage in jobs.values_list("llm_usage_by_provider", flat=True):
+        if not isinstance(usage, dict):
+            continue
+        for provider, values in usage.items():
+            if isinstance(values, dict):
+                llm_calls_by_provider[provider] = (
+                    llm_calls_by_provider.get(provider, 0)
+                    + int(values.get("calls") or 0)
+                )
 
     # Jobs per day (last 7 days)
     from django.utils import timezone as tz
@@ -434,6 +448,7 @@ def analytics_summary(request):
             "llm_calls": round(total_llm_calls / total, 1) if total else 0,
         },
         "totals_llm": total_llm_calls,
+        "llm_calls_by_provider": llm_calls_by_provider,
         "daily_jobs": [
             {"date": str(d["date"]), "count": d["count"]} for d in daily
         ],

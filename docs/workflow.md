@@ -100,6 +100,7 @@ User Input
 ### Bước 1 — User Input & Job Creation
 
 **Input Schema:**
+
 ```json
 {
   "topic": "Benefits of Multi-Agent AI Systems",
@@ -113,6 +114,7 @@ User Input
 ```
 
 **Actions:**
+
 1. Validate input
 2. Tạo `Job` record trong DB với status `pending`
 3. Estimate cost (dựa trên target_words × avg tokens/word × price)
@@ -128,6 +130,7 @@ User Input
 **Input:** `topic`, `audience`, `focus_keywords`
 
 **Process:**
+
 ```
 1. Tavily Search
    └── Query: "{topic} {year} statistics research"
@@ -149,6 +152,7 @@ User Input
 ```
 
 **Output — `ResearchDossier`:**
+
 ```json
 {
   "facts": [
@@ -181,6 +185,7 @@ User Input
 **Input:** `ResearchDossier`, `target_words`, `content_type`
 
 **Process:**
+
 ```
 1. Phân tích research dossier để xác định các themes chính
 2. LLM tạo hierarchical outline
@@ -189,6 +194,7 @@ User Input
 ```
 
 **Output — `Outline`:**
+
 ```json
 {
   "title": "The Power of Multi-Agent AI Systems: ...",
@@ -247,6 +253,7 @@ Input per writer:
 **Style Guide** được chia sẻ giữa tất cả writers để đảm bảo voice nhất quán.
 
 **Output per writer — `SectionDraft`:**
+
 ```json
 {
   "section_id":      "body_1",
@@ -268,6 +275,7 @@ Input per writer:
 **Input:** Merged full draft + ResearchDossier (để cross-check)
 
 **Checklist:**
+
 ```
 □ Grammar & spelling
 □ Sentence clarity (passive → active voice)
@@ -279,6 +287,7 @@ Input per writer:
 ```
 
 **Output:**
+
 ```json
 {
   "edited_content":  "...",
@@ -299,6 +308,7 @@ Input per writer:
 **Mục tiêu:** Tối ưu bài viết cho search engines.
 
 **Process:**
+
 ```
 1. Keyword density analysis (target: focus keyword 1-2%)
 2. Header structure optimization (H1 → H2 → H3)
@@ -310,6 +320,7 @@ Input per writer:
 ```
 
 **Output — `SEOPackage`:**
+
 ```json
 {
   "title_tag":           "Benefits of Multi-Agent AI Systems | Complete Guide",
@@ -335,6 +346,7 @@ Input per writer:
 **Mục tiêu:** Xác minh các claims trong bài viết.
 
 **Process:**
+
 ```
 1. Extract tất cả factual claims từ bài viết (LLM)
 2. Map mỗi claim với source trong ResearchDossier
@@ -343,6 +355,7 @@ Input per writer:
 ```
 
 **Output — `FactReport`:**
+
 ```json
 {
   "total_claims": 18,
@@ -374,15 +387,16 @@ Input per writer:
 
 **Scoring Rubric:**
 
-| Dimension | Weight | Criteria |
-|-----------|--------|----------|
-| Clarity | 25% | Dễ đọc, logic flow, transitions |
-| Accuracy | 25% | Fact coverage, source quality |
-| Engagement | 20% | Hook strength, varied sentence structure |
-| SEO | 15% | Keyword optimization, readability score |
-| Completeness | 15% | Covers all outline sections, meets word count |
+| Dimension    | Weight | Criteria                                      |
+| ------------ | ------ | --------------------------------------------- |
+| Clarity      | 25%    | Dễ đọc, logic flow, transitions            |
+| Accuracy     | 25%    | Fact coverage, source quality                 |
+| Engagement   | 20%    | Hook strength, varied sentence structure      |
+| SEO          | 15%    | Keyword optimization, readability score       |
+| Completeness | 15%    | Covers all outline sections, meets word count |
 
 **Output:**
+
 ```json
 {
   "overall_score":   8.2,
@@ -400,6 +414,7 @@ Input per writer:
 ```
 
 **Decision Logic:**
+
 ```
 score ≥ 7.5  AND fact_accuracy ≥ 80%  →  "approved"
 score < 7.5  AND revision_count < 3   →  "revise" (quay lại Editor với feedback)
@@ -438,28 +453,28 @@ score < 7.5  AND revision_count < 3   →  "revise" (quay lại Editor với fee
 
 ## 3. Error Handling & Edge Cases
 
-| Tình Huống | Xử Lý |
-|------------|--------|
-| Tavily search trả về 0 kết quả | Thử lại với broader query, fallback sang LLM knowledge |
-| Scraping bị block (403/captcha) | Skip URL, tiếp tục với các URLs khác |
-| LLM API timeout | Retry 3 lần với exponential backoff |
-| Writer tạo content quá ngắn (< 60% target) | Re-run writer với explicit word count instruction |
-| QA score quá thấp liên tục | Sau 3 vòng: output với `warning: low_quality` flag |
-| Budget exceeded | Dừng pipeline, notify user, lưu progress |
+| Tình Huống                                  | Xử Lý                                                   |
+| --------------------------------------------- | --------------------------------------------------------- |
+| Tavily search trả về 0 kết quả            | Thử lại với broader query, fallback sang LLM knowledge |
+| Scraping bị block (403/captcha)              | Skip URL, tiếp tục với các URLs khác                 |
+| LLM API timeout                               | Retry 3 lần với exponential backoff                     |
+| Writer tạo content quá ngắn (< 60% target) | Re-run writer với explicit word count instruction        |
+| QA score quá thấp liên tục                | Sau 3 vòng: output với `warning: low_quality` flag    |
+| Budget exceeded                               | Dừng pipeline, notify user, lưu progress                |
 
 ---
 
 ## 4. Thời Gian Ước Tính (1500-word article)
 
-| Bước | Thời Gian | Notes |
-|------|-----------|-------|
-| Research | 60-90s | Phụ thuộc số URLs cần scrape |
-| Outline | 10-15s | |
-| Parallel Writing | 40-60s | 4 sections chạy đồng thời |
-| Editing | 20-30s | |
-| SEO | 10-15s | |
-| Fact-checking | 15-20s | |
-| QA | 10-15s | |
-| **Total** | **~3-4 phút** | Nếu không cần revision |
-| With 1 revision | ~5-6 phút | |
-| With 2 revisions | ~7-8 phút | |
+| Bước           | Thời Gian           | Notes                            |
+| ---------------- | -------------------- | -------------------------------- |
+| Research         | 60-90s               | Phụ thuộc số URLs cần scrape |
+| Outline          | 10-15s               |                                  |
+| Parallel Writing | 40-60s               | 4 sections chạy đồng thời    |
+| Editing          | 20-30s               |                                  |
+| SEO              | 10-15s               |                                  |
+| Fact-checking    | 15-20s               |                                  |
+| QA               | 10-15s               |                                  |
+| **Total**  | **~3-4 phút** | Nếu không cần revision        |
+| With 1 revision  | ~5-6 phút           |                                  |
+| With 2 revisions | ~7-8 phút           |                                  |

@@ -44,9 +44,10 @@ class Job(models.Model):
     celery_task_id = models.CharField(max_length=255, blank=True)
     error_message = models.TextField(blank=True)
 
-    # Gemini usage tracking (free tier: 250 RPD)
+    # LLM usage tracking
     llm_calls_count = models.PositiveIntegerField(default=0)
     llm_tokens_used = models.PositiveIntegerField(default=0)
+    llm_usage_by_provider = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     started_at = models.DateTimeField(null=True, blank=True)
@@ -100,7 +101,8 @@ class AgentRun(models.Model):
     prompt_snapshot = models.TextField(blank=True)
     response_snapshot = models.TextField(blank=True)
 
-    # Gemini usage
+    # LLM usage
+    provider = models.CharField(max_length=50, blank=True)
     llm_calls_count = models.PositiveIntegerField(default=0)
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)

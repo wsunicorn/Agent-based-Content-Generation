@@ -19,6 +19,7 @@ import re
 from apps.pipeline.state import PipelineState
 
 from .base import BaseAgent
+from .content_guides import get_content_type_guide
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,8 @@ class EditorAgent(BaseAgent):
         system_prompt = (
             "You are a senior editor. Review and improve the provided draft for: "
             "clarity, flow, grammar, factual consistency, and adherence to the article "
-            "brief. Make targeted improvements.\n\n"
+            "brief. Make targeted improvements while preserving the requested content "
+            "type format.\n\n"
             "Respond using EXACTLY these three sections in order:\n\n"
             f"{_CHANGES_MARKER}\n"
             "- bullet point for each significant change you made\n\n"
@@ -58,6 +60,8 @@ class EditorAgent(BaseAgent):
             f"Content type: {state.content_type.replace('_', ' ').title()}\n"
             f"Target length: {state.target_length} words\n"
             f"Keywords: {', '.join(state.keywords) if state.keywords else 'none'}\n\n"
+            f"Content type guide:\n{get_content_type_guide(state.content_type)}\n\n"
+            f"Additional instructions:\n{state.additional_instructions or 'None'}\n\n"
             f"DRAFT TO EDIT:\n{draft}"
         )
 
@@ -73,8 +77,6 @@ class EditorAgent(BaseAgent):
         state.editor_changes = changes_made
         state.needs_revision = needs_revision
         state.revision_reason = revision_reason
-        if needs_revision:
-            state.revision_count += 1
 
         state.word_count = len(state.edited_draft.split())
         logger.info(
@@ -122,6 +124,8 @@ class EditorAgent(BaseAgent):
                 len(original_draft.split()),
             )
             revised_draft = original_draft
+        else:
+            revised_draft = self._clean_revised_draft(revised_draft)
 
         # --- changes made --------------------------------------------------
         changes_made: list[str] = []
@@ -144,3 +148,14 @@ class EditorAgent(BaseAgent):
                 revision_reason = re.sub(r"^YES\s*:?\s*", "", first_line, flags=re.I).strip()
 
         return revised_draft, changes_made, needs_revision, revision_reason
+
+    @staticmethod
+    def _clean_revised_draft(text: str) -> str:
+        """Remove wrapper markup that local models sometimes add around drafts."""
+        cleaned = text.strip()
+        fence = re.match(r"^```(?:markdown|md)?\s*(.*?)```$", cleaned, flags=re.I | re.S)
+        if fence:
+            cleaned = fence.group(1).strip()
+        if cleaned.startswith("---") and cleaned.endswith("---"):
+            cleaned = cleaned[3:-3].strip()
+        return cleaned

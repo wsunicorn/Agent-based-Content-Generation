@@ -680,7 +680,7 @@
   <div class="logo-icon">🤖</div>
   <div>
     <div class="nav-title">AI Content Pipeline</div>
-    <div class="nav-sub">Multi-agent · Gemini 2.5 Flash · LangGraph</div>
+    <div class="nav-sub">Multi-agent · Ollama local · LangGraph</div>
   </div>
   <div class="nav-actions">
     <span id="ws-indicator" class="status-pill pill-idle text-sm">Idle</span>
@@ -951,8 +951,11 @@ const AGENTS = [
   { id:'coordinator', icon:'🎯', label:'Coord'   },
   { id:'research',    icon:'🔍', label:'Research' },
   { id:'outline',     icon:'📐', label:'Outline'  },
-  { id:'writer',      icon:'✍️',  label:'Writer'   },
+  { id:'writer',      icon:'🧭', label:'Plan'     },
+  { id:'section_writer', icon:'✍️', label:'Sections' },
+  { id:'join_draft',  icon:'🧩', label:'Join'     },
   { id:'editor',      icon:'✏️',  label:'Editor'   },
+  { id:'coordinator_router', icon:'↪', label:'Router' },
   { id:'fact_checker',icon:'🔎', label:'Fact'     },
   { id:'seo',         icon:'📈', label:'SEO'      },
   { id:'qa',          icon:'✅', label:'QA'       },
@@ -1037,7 +1040,8 @@ function startTracking(job) {
   document.getElementById('result-section').classList.add('d-none');
 
   if (ws) { try { ws.close(); } catch {} }
-  ws = new WebSocket('ws://' + location.host + '/ws/jobs/' + job.id + '/');
+  const wsScheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  ws = new WebSocket(wsScheme + location.host + '/ws/jobs/' + job.id + '/');
   ws.onopen    = () => { setWsIndicator('running'); tlog('WebSocket connected', 'accent'); };
   ws.onclose   = () => { setWsIndicator('idle');    tlog('WebSocket closed — polling active', 'info'); };
   ws.onerror   = () =>   tlog('WebSocket error — polling fallback', 'info');
@@ -1069,8 +1073,16 @@ function handleWsMessage(data, jobId) {
       });
     } else if (data.agent === 'outline' && detail.sections_count !== undefined) {
       tlog('[outline] Completed — ' + detail.sections_count + ' section(s) planned', 'success');
-    } else if ((data.agent === 'writer' || data.agent === 'editor') && detail.word_count !== undefined) {
+    } else if (data.agent === 'writer' && detail.tasks_count !== undefined) {
+      tlog('[writer] Planned ' + detail.tasks_count + ' section writer task(s)', 'success');
+    } else if (data.agent === 'section_writer' && detail.word_count !== undefined) {
+      tlog('[section_writer] ' + (detail.heading || detail.section_kind || 'section') + ' — ~' + detail.word_count + ' words', 'success');
+    } else if ((data.agent === 'join_draft' || data.agent === 'editor') && detail.word_count !== undefined) {
       tlog('[' + data.agent + '] Completed — ~' + detail.word_count + ' words', 'success');
+    } else if (data.agent === 'coordinator_router' && detail.next_action !== undefined) {
+      const target = detail.target_agent ? ' -> ' + detail.target_agent : '';
+      tlog('[router] ' + (detail.next_action || 'approve') + target, 'accent');
+      (detail.issues || []).forEach(issue => tlog('[router] ' + issue, 'info'));
     } else if (data.agent === 'qa' && detail.qa_score !== undefined) {
       tlog('[qa] Completed — score: ' + detail.qa_score + '/100', 'success');
     } else {

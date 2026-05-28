@@ -25,6 +25,28 @@ class OutlineSection:
 
 
 @dataclass
+class SectionWriteTask:
+    section_id: int
+    section_kind: str  # "introduction" | "body" | "conclusion"
+    heading: str
+    brief: str
+    key_points: list[str] = field(default_factory=list)
+    target_words: int = 150
+    relevant_sources: list[dict[str, str]] = field(default_factory=list)
+    revision_count: int = 0
+
+
+@dataclass
+class SectionDraft:
+    section_id: int
+    section_kind: str
+    heading: str
+    content: str
+    word_count: int = 0
+    revision_count: int = 0
+
+
+@dataclass
 class SEOMetadata:
     meta_title: str = ""
     meta_description: str = ""
@@ -45,6 +67,12 @@ class QAReport:
     completeness_score: float = 0.0     # 15 pts
     passed: bool = False
     feedback: list[str] = field(default_factory=list)
+    decision: str = "review"            # approve | revise | fail_with_warning
+    next_action: str = "approve"
+    target_agent: str = ""
+    target_section_ids: list[int] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
+    revision_instructions: str = ""
 
 
 @dataclass
@@ -76,6 +104,9 @@ class PipelineState:
     # ------------------------------------------------------------------ #
     # Writer Agent output                                                  #
     # ------------------------------------------------------------------ #
+    writer_tasks: list[SectionWriteTask] = field(default_factory=list)
+    section_drafts: list[SectionDraft] = field(default_factory=list)
+    section_usage_deltas: list[dict[str, Any]] = field(default_factory=list)
     introduction: str = ""
     body_sections: dict[str, str] = field(default_factory=dict)  # heading → content
     conclusion: str = ""
@@ -111,14 +142,26 @@ class PipelineState:
     # Pipeline control                                                     #
     # ------------------------------------------------------------------ #
     current_agent: str = ""
+    last_quality_gate: str = ""
+    routing_decision: str = ""
+    next_action: str = ""
+    target_agent: str = ""
+    revision_target_section_ids: list[int] = field(default_factory=list)
+    revision_instructions: str = ""
+    routing_issues: list[str] = field(default_factory=list)
+    retry_counts: dict[str, int] = field(default_factory=dict)
+    revision_events: list[dict[str, Any]] = field(default_factory=list)
     revision_count: int = 0
     max_revisions: int = 2
+    max_agent_retries: int = 1
     error: Optional[str] = None
     completed: bool = False
 
     # Gemini usage (tracked for free-tier daily limit)
     llm_calls_total: int = 0
     llm_tokens_total: int = 0
+    llm_calls_by_provider: dict[str, int] = field(default_factory=dict)
+    llm_tokens_by_provider: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise state to a plain dict (for persistence / WebSocket push)."""
@@ -144,6 +187,20 @@ class PipelineState:
             d["sections"] = [
                 OutlineSection(**s) if isinstance(s, dict) else s
                 for s in d["sections"]
+            ]
+
+        # Reconstruct list[SectionWriteTask]
+        if d.get("writer_tasks"):
+            d["writer_tasks"] = [
+                SectionWriteTask(**s) if isinstance(s, dict) else s
+                for s in d["writer_tasks"]
+            ]
+
+        # Reconstruct list[SectionDraft]
+        if d.get("section_drafts"):
+            d["section_drafts"] = [
+                SectionDraft(**s) if isinstance(s, dict) else s
+                for s in d["section_drafts"]
             ]
 
         # Reconstruct SEOMetadata

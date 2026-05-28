@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from apps.pipeline.state import OutlineSection, PipelineState
 
 from .base import BaseAgent
+from .content_guides import get_content_type_guide
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,15 @@ SECTION_COUNTS = {
 }
 
 
+def _target_section_count(content_type: str, target_length: int) -> int:
+    base = SECTION_COUNTS.get(content_type, 4)
+    if target_length <= 500:
+        return max(2, min(base, 3))
+    if target_length <= 900:
+        return max(3, min(base, 4))
+    return base
+
+
 class OutlineAgent(BaseAgent):
     name = "outline"
 
@@ -52,12 +62,14 @@ class OutlineAgent(BaseAgent):
         logger.info("[OutlineAgent] Generating outline for: %s", state.topic[:80])
         state.current_agent = self.name
 
-        target_sections = SECTION_COUNTS.get(state.content_type, 4)
+        target_sections = _target_section_count(state.content_type, state.target_length)
+        content_type_guide = get_content_type_guide(state.content_type)
 
         system_prompt = (
             "You are a senior content strategist. Given a topic and research summary, "
             "create a well-structured article outline. Each section must have a clear "
-            "heading, a 1-2 sentence brief for the writer, and 2-4 key points to cover."
+            "heading, a 1-2 sentence brief for the writer, and 2-4 key points to cover. "
+            "Make the structure visibly different for each content type."
         )
 
         keywords_str = ", ".join(state.keywords) if state.keywords else "none specified"
@@ -67,6 +79,7 @@ class OutlineAgent(BaseAgent):
             f"Target word count: {state.target_length} words\n"
             f"Keywords: {keywords_str}\n"
             f"Target sections: {target_sections}\n\n"
+            f"Content type guide:\n{content_type_guide}\n\n"
             f"Research summary:\n{state.research_summary}\n\n"
             f"Additional instructions: {state.additional_instructions or 'None'}\n\n"
             f"Generate {target_sections} sections for the article body "

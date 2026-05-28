@@ -14,6 +14,7 @@ import dataclasses
 import logging
 
 from celery import shared_task
+from django.conf import settings
 from django.utils import timezone as dj_timezone
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,8 @@ def run_pipeline(self, job_id: str):
         target_length=job.target_length,
         keywords=job.keywords or [],
         additional_instructions=combined_instructions,
+        max_revisions=getattr(settings, "MAX_PIPELINE_REVISIONS", 2),
+        max_agent_retries=getattr(settings, "MAX_AGENT_RETRIES", 1),
     )
 
     try:
@@ -112,9 +115,13 @@ def run_pipeline(self, job_id: str):
         final_state = dict(initial)
 
         # Use stream() so we can push WebSocket progress after each node
-        for chunk in graph.stream(initial):
+        stream_config = {
+            "max_concurrency": max(1, getattr(settings, "MAX_PARALLEL_WRITERS", 2)),
+            "recursion_limit": max(25, getattr(settings, "LANGGRAPH_RECURSION_LIMIT", 80)),
+        }
+        for chunk in graph.stream(initial, stream_config):
             for node_name, node_output in chunk.items():
-                final_state.update(node_output)
+                _merge_graph_output(final_state, node_output)
                 # Build rich detail payload for the frontend
                 detail: dict = {}
                 if node_name == "research":
@@ -131,15 +138,36 @@ def run_pipeline(self, job_id: str):
                     sections = node_output.get("sections", [])
                     detail = {"sections_count": len(sections)}
                 elif node_name == "writer":
+                    tasks = node_output.get("writer_tasks", []) or []
+                    detail = {"tasks_count": len(tasks)}
+                elif node_name == "section_writer":
+                    drafts = node_output.get("section_drafts", []) or []
+                    draft = drafts[0] if drafts else {}
+                    detail = {
+                        "heading": draft.get("heading", ""),
+                        "section_kind": draft.get("section_kind", ""),
+                        "word_count": draft.get("word_count", 0),
+                    }
+                elif node_name == "join_draft":
                     draft = node_output.get("draft", "") or ""
                     detail = {"word_count": len(draft.split())}
                 elif node_name == "editor":
                     edited = node_output.get("edited_draft", "") or ""
                     detail = {"word_count": len(edited.split())}
+                elif node_name == "coordinator_router":
+                    detail = {
+                        "next_action": node_output.get("next_action", ""),
+                        "target_agent": node_output.get("target_agent", ""),
+                        "revision_count": node_output.get("revision_count", 0),
+                        "issues": node_output.get("routing_issues", [])[:3],
+                    }
                 elif node_name == "qa":
                     qa = node_output.get("qa_report")
                     if isinstance(qa, dict):
-                        detail = {"qa_score": qa.get("overall_score", 0)}
+                        detail = {
+                            "qa_score": qa.get("overall_score", 0),
+                            "next_action": qa.get("next_action", ""),
+                        }
                 push_progress(job_id, node_name, "completed", detail or None)
                 logger.info("Node completed: %s (job=%s)", node_name, job_id)
 
@@ -148,6 +176,7 @@ def run_pipeline(self, job_id: str):
 
         # Persist artifacts
         _save_artifacts(job, state)
+        _save_revisions(job, state)
 
         # Update job record
         qa_score = state.qa_report.overall_score if state.qa_report else 0.0
@@ -155,10 +184,11 @@ def run_pipeline(self, job_id: str):
         job.completed_at = dj_timezone.now()
         job.llm_calls_count = state.llm_calls_total
         job.llm_tokens_used = state.llm_tokens_total
+        job.llm_usage_by_provider = _build_llm_usage_by_provider(state)
         job.error_message = ""
         job.save(update_fields=[
             "status", "completed_at", "llm_calls_count",
-            "llm_tokens_used", "error_message",
+            "llm_tokens_used", "llm_usage_by_provider", "error_message",
         ])
 
         push_completed(job_id, qa_score)
@@ -269,3 +299,74 @@ def _save_artifacts(job, state):
 
     if artifacts_to_create:
         Artifact.objects.bulk_create(artifacts_to_create)
+
+
+def _save_revisions(job, state):
+    from apps.jobs.models import AgentRun, Revision
+
+    if not state.revision_events:
+        return
+
+    valid_agents = {choice[0] for choice in AgentRun.AgentType.choices}
+    existing_numbers = set(
+        Revision.objects.filter(job=job).values_list("revision_number", flat=True)
+    )
+    revisions_to_create = []
+
+    for event in state.revision_events:
+        revision_number = int(event.get("revision_number") or 0)
+        if not revision_number or revision_number in existing_numbers:
+            continue
+
+        triggered_by = event.get("triggered_by") or "qa"
+        if triggered_by == "coordinator_router":
+            triggered_by = "coordinator"
+        if triggered_by not in valid_agents:
+            triggered_by = "qa"
+
+        issues = event.get("issues") or []
+        if event.get("target_section_ids"):
+            issues = list(issues) + [
+                f"Target section ids: {event.get('target_section_ids')}"
+            ]
+        if event.get("target_agent"):
+            issues = list(issues) + [f"Target agent: {event.get('target_agent')}"]
+        if event.get("next_action"):
+            issues = list(issues) + [f"Next action: {event.get('next_action')}"]
+
+        revisions_to_create.append(
+            Revision(
+                job=job,
+                revision_number=revision_number,
+                triggered_by=triggered_by,
+                reason=event.get("reason") or "Revision requested by router.",
+                issues=issues,
+                resolved=True,
+            )
+        )
+        existing_numbers.add(revision_number)
+
+    if revisions_to_create:
+        Revision.objects.bulk_create(revisions_to_create)
+
+
+def _merge_graph_output(final_state: dict, node_output: dict) -> None:
+    """Merge stream chunks using the same reducer semantics as the graph."""
+    list_reducer_keys = {"section_drafts", "section_usage_deltas"}
+    for key, value in node_output.items():
+        if key in list_reducer_keys:
+            final_state[key] = (final_state.get(key) or []) + (value or [])
+        else:
+            final_state[key] = value
+
+
+def _build_llm_usage_by_provider(state) -> dict:
+    """Return provider-level usage in a shape that is easy to render and query."""
+    providers = set(state.llm_calls_by_provider) | set(state.llm_tokens_by_provider)
+    return {
+        provider: {
+            "calls": state.llm_calls_by_provider.get(provider, 0),
+            "tokens": state.llm_tokens_by_provider.get(provider, 0),
+        }
+        for provider in sorted(providers)
+    }

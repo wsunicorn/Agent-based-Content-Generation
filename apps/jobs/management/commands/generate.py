@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import time
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.jobs.models import Job
+from apps.jobs.tasks import _build_llm_usage_by_provider
 
 
 class Command(BaseCommand):
@@ -109,7 +111,7 @@ class Command(BaseCommand):
         import dataclasses
         from django.utils import timezone
 
-        from apps.jobs.tasks import _save_artifacts
+        from apps.jobs.tasks import _save_artifacts, _save_revisions
         from apps.pipeline.graph import get_pipeline_graph
         from apps.pipeline.state import PipelineState
 
@@ -124,6 +126,8 @@ class Command(BaseCommand):
             target_length=job.target_length,
             keywords=job.keywords or [],
             additional_instructions=job.additional_instructions or "",
+            max_revisions=getattr(settings, "MAX_PIPELINE_REVISIONS", 2),
+            max_agent_retries=getattr(settings, "MAX_AGENT_RETRIES", 1),
         )
 
         try:
@@ -134,26 +138,44 @@ class Command(BaseCommand):
             self.stdout.write("  [coordinator] → ", ending="")
             self.stdout.flush()
 
-            final = graph.invoke(initial)
+            final = graph.invoke(
+                initial,
+                {
+                    "max_concurrency": max(1, getattr(settings, "MAX_PARALLEL_WRITERS", 2)),
+                    "recursion_limit": max(25, getattr(settings, "LANGGRAPH_RECURSION_LIMIT", 80)),
+                },
+            )
             elapsed = time.time() - t0
 
             valid_fields = {f.name for f in dataclasses.fields(PipelineState)}
             state = PipelineState.from_dict(final)
 
             _save_artifacts(job, state)
+            _save_revisions(job, state)
 
             job.status = Job.Status.COMPLETED
             job.completed_at = timezone.now()
             job.llm_calls_count = state.llm_calls_total
             job.llm_tokens_used = state.llm_tokens_total
-            job.save(update_fields=["status", "completed_at", "llm_calls_count", "llm_tokens_used"])
+            job.llm_usage_by_provider = _build_llm_usage_by_provider(state)
+            job.save(update_fields=[
+                "status",
+                "completed_at",
+                "llm_calls_count",
+                "llm_tokens_used",
+                "llm_usage_by_provider",
+            ])
 
             self.stdout.write(self.style.SUCCESS("\n\n=== PIPELINE COMPLETE ==="))
             self.stdout.write(f"  Elapsed    : {elapsed:.1f}s")
             self.stdout.write(f"  Words      : {state.word_count}")
             self.stdout.write(f"  LLM calls  : {state.llm_calls_total}")
+            self.stdout.write(
+                f"  Providers  : {json.dumps(job.llm_usage_by_provider, ensure_ascii=False)}"
+            )
             self.stdout.write(f"  QA score   : {state.qa_report.overall_score if state.qa_report else 'N/A'}")
             self.stdout.write(f"  QA passed  : {state.qa_report.passed if state.qa_report else False}")
+            self.stdout.write(f"  Revisions  : {len(state.revision_events)}")
 
             if state.final_content:
                 self.stdout.write("\n--- FINAL CONTENT (first 500 chars) ---")

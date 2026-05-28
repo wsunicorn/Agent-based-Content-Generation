@@ -42,7 +42,8 @@ class ResearchAgent(BaseAgent):
         state.sources = sources[:MAX_SOURCES]
 
         state.research_summary = self._summarise(state)
-        self._track_usage(state, calls=1)
+        if state.sources:
+            self._track_usage(state, calls=1)
 
         logger.info(
             "[ResearchAgent] Done — %d sources, summary %d chars",
@@ -56,6 +57,10 @@ class ResearchAgent(BaseAgent):
     # ------------------------------------------------------------------ #
 
     def _search_tavily(self, topic: str, keywords: list[str]) -> list[dict]:
+        if not getattr(settings, "ENABLE_WEB_SEARCH", True):
+            logger.info("[ResearchAgent] Web search disabled by settings.")
+            return []
+
         api_key = getattr(settings, "TAVILY_API_KEY", "")
         if not api_key:
             logger.warning("[ResearchAgent] TAVILY_API_KEY not set — skipping web search.")

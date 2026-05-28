@@ -12,6 +12,7 @@ class AgentRunSerializer(serializers.ModelSerializer):
             "agent_type",
             "status",
             "attempt",
+            "provider",
             "llm_calls_count",
             "input_tokens",
             "output_tokens",
@@ -60,6 +61,7 @@ class JobListSerializer(serializers.ModelSerializer):
             "status",
             "language",
             "llm_calls_count",
+            "llm_usage_by_provider",
             "created_at",
             "completed_at",
         ]
@@ -86,6 +88,7 @@ class JobDetailSerializer(serializers.ModelSerializer):
             "error_message",
             "llm_calls_count",
             "llm_tokens_used",
+            "llm_usage_by_provider",
             "created_at",
             "started_at",
             "completed_at",

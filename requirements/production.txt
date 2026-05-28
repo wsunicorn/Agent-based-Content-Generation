@@ -1,3 +1,4 @@
 -r base.txt
 gunicorn==23.*
 sentry-sdk==2.*
+whitenoise==6.*

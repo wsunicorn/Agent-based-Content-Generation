@@ -21,15 +21,15 @@ Tuần 4: Polish (Export + Analytics + Templates + Demo)
 
 #### Setup (Ngày 1)
 
-- [ ] **1.1** Khởi tạo Django project
+- [X] **1.1** Khởi tạo Django project
   ```bash
   django-admin startproject config .
   python manage.py startapp jobs
   python manage.py startapp agents
   python manage.py startapp pipeline
   ```
-- [ ] **1.2** Cấu hình settings: `base.py`, `development.py`, `production.py`
-- [ ] **1.3** Tích hợp `django-environ`, load `.env`
+- [X] **1.2** Cấu hình settings: `base.py`, `development.py`, `production.py`
+- [X] **1.3** Tích hợp `django-environ`, load `.env`
 - [ ] **1.4** Setup PostgreSQL + Redis với `docker-compose.dev.yml`
 - [ ] **1.5** Cấu hình Celery: `config/celery.py`
 - [ ] **1.6** Cài đặt tất cả dependencies (`requirements/base.txt`)
@@ -324,15 +324,15 @@ Live Demo:
 
 ## Risk Log
 
-| Risk                                    | Probability | Impact | Mitigation                                             |
-| --------------------------------------- | ----------- | ------ | ------------------------------------------------------ |
-| Gemini free tier rate limits (10 RPM)   | High        | Medium | Add 6s delay giữa LLM calls, sequential writers       |
-| Gemini RPD limit (250/ngày) hết         | Medium      | High   | Pre-cache demo outputs, dùng mock data khi test       |
-| LangGraph breaking changes              | Low         | Medium | Pin exact version, test before upgrade                 |
-| Playwright scraping blocked             | Medium      | Low    | Tavily has content extraction, reduces need            |
-| Revision loop takes too long            | Medium      | Medium | 3-round max, force approve with warning                |
-| Token bloat làm chậm pipeline           | Medium      | Medium | Apply token optimization strategy (xem tech-stack.md) |
-| WebSocket disconnects              | Low         | Low    | Auto-reconnect + polling fallback              |
+| Risk                                  | Probability | Impact | Mitigation                                            |
+| ------------------------------------- | ----------- | ------ | ----------------------------------------------------- |
+| Gemini free tier rate limits (10 RPM) | High        | Medium | Add 6s delay giữa LLM calls, sequential writers      |
+| Gemini RPD limit (250/ngày) hết     | Medium      | High   | Pre-cache demo outputs, dùng mock data khi test      |
+| LangGraph breaking changes            | Low         | Medium | Pin exact version, test before upgrade                |
+| Playwright scraping blocked           | Medium      | Low    | Tavily has content extraction, reduces need           |
+| Revision loop takes too long          | Medium      | Medium | 3-round max, force approve with warning               |
+| Token bloat làm chậm pipeline       | Medium      | Medium | Apply token optimization strategy (xem tech-stack.md) |
+| WebSocket disconnects                 | Low         | Low    | Auto-reconnect + polling fallback                     |
 
 ---
 

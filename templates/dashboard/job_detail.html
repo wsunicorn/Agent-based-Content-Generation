@@ -381,6 +381,11 @@
     <div class="stats-band">
       <div class="stat-item">📝 <strong id="word-count-val">—</strong> words</div>
       <div class="stat-item">🤖 <strong>{{ job.llm_calls_count }}</strong> LLM calls</div>
+      {% if job.llm_usage_by_provider %}
+        {% for provider, usage in job.llm_usage_by_provider.items %}
+          <div class="stat-item"><strong>{{ provider }}</strong> {{ usage.calls }} calls</div>
+        {% endfor %}
+      {% endif %}
       {% if job.duration_seconds %}<div class="stat-item">⏱ <strong>{{ job.duration_seconds|floatformat:0 }}s</strong></div>{% endif %}
       <div class="stat-item">🔑 <strong>{{ job.keywords|join:", "|default:"—" }}</strong></div>
     </div>
@@ -558,13 +563,21 @@ async function loadQA() {
       el.className   = 'qa-ring-number ' + (score>=80?'good':score>=60?'ok':'poor');
       document.getElementById('qa-ring-wrap').style.display = 'flex';
     }
-    const criteria = qa.criteria || {};
-    const issues   = qa.issues   || [];
+    const criteria = qa.criteria || {
+      clarity: qa.clarity_score,
+      accuracy: qa.accuracy_score,
+      engagement: qa.engagement_score,
+      seo: qa.seo_score,
+      completeness: qa.completeness_score,
+    };
+    const issues = qa.issues || qa.feedback || [];
     const html = Object.entries(criteria).map(([name, val]) => {
-      const s   = typeof val === 'object' ? (val.score || 0) : val;
-      const cls = s >= 8 ? 'high' : s >= 5 ? 'mid' : 'low';
+      const s   = typeof val === 'object' ? (val.score || 0) : (val || 0);
+      const max = ['clarity', 'accuracy'].includes(name) ? 25 : (name === 'engagement' ? 20 : 15);
+      const pct = max ? (s / max * 100) : 0;
+      const cls = pct >= 80 ? 'high' : pct >= 60 ? 'mid' : 'low';
       return '<div class="qa-criterion"><div class="qa-crit-name">' + esc(name.replace(/_/g,' ')) + '</div>'
-        + '<div class="qa-crit-score ' + cls + '">' + s + '/10</div></div>';
+        + '<div class="qa-crit-score ' + cls + '">' + s + '/' + max + '</div></div>';
     }).join('') +
     (issues.length ? '<div style="margin-top:16px;font-size:.78rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Issues</div>'
       + issues.map(i => '<div style="padding:8px 14px;margin-bottom:6px;background:rgba(242,93,93,.08);border:1px solid rgba(242,93,93,.2);border-radius:8px;font-size:.82rem;color:#fca5a5;">' + esc(i) + '</div>').join('')
@@ -582,7 +595,11 @@ async function loadSEO() {
     if (!r.ok) { document.getElementById('seo-content').innerHTML = '<p style="color:var(--text-3)">SEO data not available.</p>'; document.getElementById('seo-content').style.display='block'; return; }
     const art = await r.json();
     const seo = art.content_json || {};
-    const kws = (seo.keywords || []).map(k => '<span class="kw-chip">' + esc(k) + '</span>').join('');
+    const keywordList = [
+      seo.focus_keyword,
+      ...((seo.secondary_keywords || seo.keywords || []).filter(Boolean))
+    ].filter(Boolean);
+    const kws = keywordList.map(k => '<span class="kw-chip">' + esc(k) + '</span>').join('');
     const html =
       '<div class="seo-grid">'
         + '<div class="seo-box"><div class="seo-box-label">Meta Title</div><div class="seo-box-val">' + esc(seo.meta_title||'—') + '</div></div>'

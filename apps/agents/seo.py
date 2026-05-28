@@ -140,7 +140,9 @@ class SEOAgent(BaseAgent):
         snippet = text[:500]
         user_prompt = (
             f"Article topic: {state.topic}\n"
+            f"Content type: {state.content_type.replace('_', ' ').title()}\n"
             f"Keywords: {', '.join(state.keywords) if state.keywords else 'none'}\n"
+            f"Additional instructions:\n{state.additional_instructions or 'None'}\n"
             f"Article snippet:\n{snippet}\n\n"
             "Generate SEO metadata. Remember: meta_title ≤60 chars, meta_description ≤155 chars."
         )
@@ -151,7 +153,7 @@ class SEOAgent(BaseAgent):
             return result
 
         # Fallback defaults
-        from python_slugify import slugify
+        from slugify import slugify
         return SEOOutput(
             meta_title=state.topic[:65],
             meta_description=f"Read about {state.topic}."[:165],

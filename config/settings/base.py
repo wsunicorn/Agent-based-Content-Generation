@@ -13,6 +13,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 env = environ.Env()
 environ.Env.read_env(BASE_DIR / ".env")
 
+
+def _parse_env_mapping(value: str) -> dict[str, str]:
+    """Parse comma-separated key=value or key:value mappings from env vars."""
+    mapping: dict[str, str] = {}
+    for item in (value or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        separator = "=" if "=" in item else ":"
+        if separator not in item:
+            continue
+        key, raw_value = item.split(separator, 1)
+        key = key.strip()
+        raw_value = raw_value.strip()
+        if key and raw_value:
+            mapping[key] = raw_value
+    return mapping
+
 # ---------------------------------------------------------------------------
 # Security
 # ---------------------------------------------------------------------------
@@ -151,6 +169,12 @@ CHANNEL_LAYERS = {
         },
     },
 }
+if env.bool("USE_INMEMORY_CHANNEL_LAYER", default=False):
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 # ---------------------------------------------------------------------------
 # Celery
@@ -163,22 +187,71 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
+CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=True)
 CELERY_TASK_TIME_LIMIT = 3600  # 1 hour hard limit
 CELERY_TASK_SOFT_TIME_LIMIT = 3300  # warn at 55 minutes
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # ---------------------------------------------------------------------------
+# LLM providers
+# ---------------------------------------------------------------------------
+LLM_MODE = env("LLM_MODE", default="balanced").lower()  # cheap | balanced | quality
+LLM_PROVIDER = env("LLM_PROVIDER", default="gemini").lower()
+LOCAL_LLM_PROVIDER = env("LOCAL_LLM_PROVIDER", default="ollama").lower()
+STRUCTURED_LLM_PROVIDER = env("STRUCTURED_LLM_PROVIDER", default="gemini").lower()
+LOCAL_LLM_AGENTS = env.list("LOCAL_LLM_AGENTS", default=["writer", "editor", "qa"])
+LLM_AGENT_PROVIDERS = _parse_env_mapping(env("LLM_AGENT_PROVIDERS", default=""))
+LLM_AGENT_MODELS = _parse_env_mapping(env("LLM_AGENT_MODELS", default=""))
+GEMINI_AGENT_MODELS = _parse_env_mapping(env("GEMINI_AGENT_MODELS", default=""))
+LLM_FALLBACK_TO_GEMINI = env.bool("LLM_FALLBACK_TO_GEMINI", default=True)
+LOCAL_LLM_REQUEST_DELAY = env.float("LOCAL_LLM_REQUEST_DELAY", default=0.0)
+LOCAL_LLM_TIMEOUT = env.int("LOCAL_LLM_TIMEOUT", default=180)
+
+# ---------------------------------------------------------------------------
 # Google Gemini (free-tier: 10 RPM, 250 RPD)
 # ---------------------------------------------------------------------------
-GOOGLE_API_KEY = env("GOOGLE_API_KEY")
-GEMINI_MODEL = env("GEMINI_MODEL", default="gemini-2.5-flash")
+GOOGLE_API_KEY = env("GOOGLE_API_KEY", default="")
+GEMINI_MODEL = env("GEMINI_MODEL", default="gemini-3.1-flash-lite")
 GEMINI_REQUEST_DELAY = env.float("GEMINI_REQUEST_DELAY", default=6.5)  # seconds between calls
 GEMINI_DAILY_LIMIT = env.int("GEMINI_DAILY_LIMIT", default=250)
 GEMINI_DAILY_WARN_AT = env.int("GEMINI_DAILY_WARN_AT", default=200)
 
 # ---------------------------------------------------------------------------
+# Local / OpenAI-compatible LLMs
+# ---------------------------------------------------------------------------
+OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
+OLLAMA_MODEL = env("OLLAMA_MODEL", default="qwen2.5:7b")
+OLLAMA_THINK = env.bool("OLLAMA_THINK", default=False)
+OLLAMA_FAST_MODEL = env("OLLAMA_FAST_MODEL", default="qwen2.5:3b")
+OLLAMA_REASONING_MODEL = env("OLLAMA_REASONING_MODEL", default="qwen3:8b")
+OLLAMA_STRUCTURED_MODEL = env("OLLAMA_STRUCTURED_MODEL", default="qwen2.5:7b")
+OLLAMA_EMBED_MODEL = env("OLLAMA_EMBED_MODEL", default="nomic-embed-text-v2-moe")
+OLLAMA_VISION_MODEL = env("OLLAMA_VISION_MODEL", default="gemma3:4b")
+OLLAMA_REQUIRED_MODELS = env.list(
+    "OLLAMA_REQUIRED_MODELS",
+    default=[
+        "qwen2.5:7b",
+        "qwen3:8b",
+        "nomic-embed-text-v2-moe",
+        "gemma3:4b",
+    ],
+)
+MAX_PARALLEL_WRITERS = env.int("MAX_PARALLEL_WRITERS", default=2)
+MAX_PIPELINE_REVISIONS = env.int("MAX_PIPELINE_REVISIONS", default=2)
+MAX_AGENT_RETRIES = env.int("MAX_AGENT_RETRIES", default=1)
+LANGGRAPH_RECURSION_LIMIT = env.int("LANGGRAPH_RECURSION_LIMIT", default=80)
+OPENAI_COMPATIBLE_BASE_URL = env(
+    "OPENAI_COMPATIBLE_BASE_URL",
+    default="http://localhost:1234/v1",
+)
+OPENAI_COMPATIBLE_MODEL = env("OPENAI_COMPATIBLE_MODEL", default="local-model")
+OPENAI_COMPATIBLE_API_KEY = env("OPENAI_COMPATIBLE_API_KEY", default="")
+
+# ---------------------------------------------------------------------------
 # Tavily Search API
 # ---------------------------------------------------------------------------
+ENABLE_WEB_SEARCH = env.bool("ENABLE_WEB_SEARCH", default=True)
 TAVILY_API_KEY = env("TAVILY_API_KEY", default="")
 
 # ---------------------------------------------------------------------------

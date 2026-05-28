@@ -38,11 +38,14 @@ class JobProgressConsumer(AsyncWebsocketConsumer):
     # ------------------------------------------------------------------ #
 
     async def job_progress(self, event):
-        await self.send(text_data=json.dumps({
+        payload = {
             "type": "progress",
             "agent": event.get("agent"),
             "status": event.get("status"),
-        }))
+        }
+        if event.get("detail") is not None:
+            payload["detail"] = event.get("detail")
+        await self.send(text_data=json.dumps(payload))
 
     async def job_completed(self, event):
         await self.send(text_data=json.dumps({
