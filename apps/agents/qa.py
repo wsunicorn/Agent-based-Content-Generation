@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from django.conf import settings
 from pydantic import BaseModel, Field
 
 from apps.pipeline.state import PipelineState, QAReport
@@ -52,9 +53,12 @@ class QAAgent(BaseAgent):
         completeness = self._completeness_score(state)        # max 15
         seo_pts = self._seo_score_pts(state)                  # max 15
 
-        # LLM scores (1 call)
-        llm_scores = self._llm_score(state, text)
-        self._track_usage(state, calls=1)
+        if state.quality_mode == "fast" and not getattr(settings, "FAST_MODE_LLM_QA", False):
+            llm_scores = self._fast_llm_scores(state, text)
+        else:
+            # LLM scores (1 call)
+            llm_scores = self._llm_score(state, text)
+            self._track_usage(state, calls=1)
 
         total = (
             llm_scores.clarity_score
@@ -127,6 +131,30 @@ class QAAgent(BaseAgent):
     # ------------------------------------------------------------------ #
     # LLM quality scoring (1 call)
     # ------------------------------------------------------------------ #
+
+    def _fast_llm_scores(self, state: PipelineState, text: str) -> QAScores:
+        word_count = len(text.split())
+        target = max(1, state.target_length)
+        length_ratio = min(1.2, word_count / target)
+        clarity = 20.0 if word_count >= 80 else 15.0
+        accuracy = 22.0 if state.fact_check_passed else 17.0
+        engagement = 16.0 if length_ratio >= 0.65 else 12.0
+        feedback = []
+        if length_ratio < 0.65:
+            feedback.append("Draft is shorter than expected.")
+        if not state.fact_check_passed:
+            feedback.append("Fact-check warnings remain.")
+        return QAScores(
+            clarity_score=clarity,
+            accuracy_score=accuracy,
+            engagement_score=engagement,
+            feedback=feedback or ["Fast QA heuristic passed."],
+            decision="approve",
+            next_action="approve",
+            target_agent="",
+            issues=[],
+            revision_instructions="",
+        )
 
     def _llm_score(self, state: PipelineState, text: str) -> QAScores:
         system_prompt = (

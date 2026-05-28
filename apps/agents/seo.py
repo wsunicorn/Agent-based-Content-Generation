@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 
+from django.conf import settings
 from pydantic import BaseModel, Field, field_validator
 
 from apps.pipeline.state import PipelineState, SEOMetadata
@@ -51,9 +52,11 @@ class SEOAgent(BaseAgent):
         readability = self._readability_score(final_text)
         kw_score = self._keyword_density_score(final_text, state.keywords)
 
-        # 1 LLM call for metadata
-        metadata = self._generate_metadata(state, final_text)
-        self._track_usage(state, calls=1)
+        if state.quality_mode == "fast" and not getattr(settings, "FAST_MODE_LLM_SEO", False):
+            metadata = self._generate_fast_metadata(state)
+        else:
+            metadata = self._generate_metadata(state, final_text)
+            self._track_usage(state, calls=1)
 
         state.seo_metadata = SEOMetadata(
             meta_title=metadata.meta_title,
@@ -159,4 +162,17 @@ class SEOAgent(BaseAgent):
             meta_description=f"Read about {state.topic}."[:165],
             slug=slugify(state.topic),
             focus_keyword=state.keywords[0] if state.keywords else state.topic[:30],
+        )
+
+    @staticmethod
+    def _generate_fast_metadata(state: PipelineState) -> SEOOutput:
+        from slugify import slugify
+
+        focus_keyword = state.keywords[0] if state.keywords else state.topic[:30]
+        return SEOOutput(
+            meta_title=state.topic[:60],
+            meta_description=f"{state.topic}: practical, concise guidance."[:155],
+            slug=slugify(state.topic),
+            focus_keyword=focus_keyword,
+            secondary_keywords=state.keywords[1:5],
         )

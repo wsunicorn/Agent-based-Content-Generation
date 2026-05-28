@@ -79,6 +79,7 @@ def run_pipeline(self, job_id: str):
     """Execute the full multi-agent pipeline for a job."""
     from apps.jobs.models import Job
     from apps.pipeline.graph import get_pipeline_graph
+    from apps.pipeline.quality import normalise_quality_mode, revision_limits
     from apps.pipeline.state import PipelineState
 
     try:
@@ -97,16 +98,19 @@ def run_pipeline(self, job_id: str):
     base_instructions = job.additional_instructions or ""
     lang_prefix = f"Language: Write the entire article in {lang}.\n" if lang and lang.lower() != "english" else ""
     combined_instructions = (lang_prefix + base_instructions).strip()
+    quality_mode = normalise_quality_mode(getattr(job, "quality_mode", "standard"))
+    max_revisions, max_agent_retries = revision_limits(quality_mode)
 
     state = PipelineState(
         job_id=str(job.id),
         topic=job.topic,
         content_type=job.content_type,
+        quality_mode=quality_mode,
         target_length=job.target_length,
         keywords=job.keywords or [],
         additional_instructions=combined_instructions,
-        max_revisions=getattr(settings, "MAX_PIPELINE_REVISIONS", 2),
-        max_agent_retries=getattr(settings, "MAX_AGENT_RETRIES", 1),
+        max_revisions=max_revisions,
+        max_agent_retries=max_agent_retries,
     )
 
     try:
@@ -122,6 +126,7 @@ def run_pipeline(self, job_id: str):
         for chunk in graph.stream(initial, stream_config):
             for node_name, node_output in chunk.items():
                 _merge_graph_output(final_state, node_output)
+                _update_job_progress(job, final_state)
                 # Build rich detail payload for the frontend
                 detail: dict = {}
                 if node_name == "research":
@@ -154,12 +159,26 @@ def run_pipeline(self, job_id: str):
                 elif node_name == "editor":
                     edited = node_output.get("edited_draft", "") or ""
                     detail = {"word_count": len(edited.split())}
+                elif node_name == "fact_checker":
+                    report = node_output.get("fact_check_report") or {}
+                    detail = {
+                        "passed": node_output.get("fact_check_passed", False),
+                        "unverified_count": len(node_output.get("unverified_claims", []) or []),
+                        "claims_checked": report.get("claims_checked", 0),
+                        "mode": report.get("mode", ""),
+                    }
                 elif node_name == "coordinator_router":
                     detail = {
                         "next_action": node_output.get("next_action", ""),
                         "target_agent": node_output.get("target_agent", ""),
                         "revision_count": node_output.get("revision_count", 0),
                         "issues": node_output.get("routing_issues", [])[:3],
+                    }
+                elif node_name == "seo":
+                    metadata = node_output.get("seo_metadata") or {}
+                    detail = {
+                        "focus_keyword": metadata.get("focus_keyword", ""),
+                        "seo_score": metadata.get("seo_score", 0),
                     }
                 elif node_name == "qa":
                     qa = node_output.get("qa_report")
@@ -240,6 +259,16 @@ def _save_artifacts(job, state):
             )
         )
 
+    if state.sources:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.SOURCE_DOCUMENTS,
+                content_json={"sources": [dataclasses.asdict(s) for s in state.sources]},
+                word_count=sum(len(s.content.split()) for s in state.sources),
+            )
+        )
+
     if state.sections:
         artifacts_to_create.append(
             Artifact(
@@ -285,6 +314,15 @@ def _save_artifacts(job, state):
                 job=job,
                 artifact_type=Artifact.ArtifactType.SEO_METADATA,
                 content_json=dataclasses.asdict(state.seo_metadata),
+            )
+        )
+
+    if state.fact_check_report:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.FACT_CHECK_REPORT,
+                content_json=state.fact_check_report,
             )
         )
 
@@ -358,6 +396,24 @@ def _merge_graph_output(final_state: dict, node_output: dict) -> None:
             final_state[key] = (final_state.get(key) or []) + (value or [])
         else:
             final_state[key] = value
+
+
+def _update_job_progress(job, final_state: dict) -> None:
+    """Persist partial usage while the graph is still running."""
+    try:
+        from apps.pipeline.state import PipelineState
+
+        state = PipelineState.from_dict(final_state)
+        job.llm_calls_count = state.llm_calls_total
+        job.llm_tokens_used = state.llm_tokens_total
+        job.llm_usage_by_provider = _build_llm_usage_by_provider(state)
+        job.save(update_fields=[
+            "llm_calls_count",
+            "llm_tokens_used",
+            "llm_usage_by_provider",
+        ])
+    except Exception as exc:
+        logger.debug("Could not update partial job progress: %s", exc)
 
 
 def _build_llm_usage_by_provider(state) -> dict:

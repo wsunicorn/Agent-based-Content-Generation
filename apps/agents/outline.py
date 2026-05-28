@@ -46,10 +46,14 @@ SECTION_COUNTS = {
 }
 
 
-def _target_section_count(content_type: str, target_length: int) -> int:
+def _target_section_count(content_type: str, target_length: int, quality_mode: str = "standard") -> int:
     base = SECTION_COUNTS.get(content_type, 4)
+    if quality_mode == "fast":
+        if target_length <= 700:
+            return 2
+        return max(3, min(base, 4))
     if target_length <= 500:
-        return max(2, min(base, 3))
+        return 2
     if target_length <= 900:
         return max(3, min(base, 4))
     return base
@@ -62,7 +66,11 @@ class OutlineAgent(BaseAgent):
         logger.info("[OutlineAgent] Generating outline for: %s", state.topic[:80])
         state.current_agent = self.name
 
-        target_sections = _target_section_count(state.content_type, state.target_length)
+        target_sections = _target_section_count(
+            state.content_type,
+            state.target_length,
+            state.quality_mode,
+        )
         content_type_guide = get_content_type_guide(state.content_type)
 
         system_prompt = (

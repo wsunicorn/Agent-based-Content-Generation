@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from apps.pipeline.quality import normalise_quality_mode, revision_limits, should_allow_fact_revision
 from apps.pipeline.state import PipelineState
 
 from .base import BaseAgent
@@ -31,6 +32,9 @@ class CoordinatorAgent(BaseAgent):
 
         if state.content_type not in VALID_CONTENT_TYPES:
             state.content_type = "blog_post"
+
+        state.quality_mode = normalise_quality_mode(state.quality_mode)
+        state.max_revisions, state.max_agent_retries = revision_limits(state.quality_mode)
 
         state.target_length = max(300, min(5000, state.target_length))
         state.keywords = [kw.strip() for kw in state.keywords if kw.strip()][:10]
@@ -121,6 +125,16 @@ class CoordinatorAgent(BaseAgent):
             for item in (state.unverified_claims or [])[:5]
             if isinstance(item, dict)
         ] or ["Unverified factual claims remain."]
+
+        if not should_allow_fact_revision(state, unverified_count):
+            return self._apply_decision(
+                state,
+                next_action="approve",
+                target_agent="seo",
+                decision="warning",
+                issues=issues + ["Fact-check warnings recorded without revision."],
+                instructions="Continue because this content type does not require strict factual revision.",
+            )
 
         evidence_weak = not state.sources or not state.research_summary or unverified_count >= 3
         if evidence_weak and self._can_retry(state, "research"):

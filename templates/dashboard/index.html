@@ -745,6 +745,16 @@
               </select>
             </div>
             <div class="form-group" style="margin-bottom:0">
+              <label class="field-label" for="quality_mode">Quality Mode</label>
+              <select class="field-select" id="quality_mode">
+                <option value="standard">Standard</option>
+                <option value="fast">Fast</option>
+                <option value="strict">Strict</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:14px;">
+            <div class="form-group" style="margin-bottom:0">
               <label class="field-label" for="keywords">Keywords <span class="text-dim">(comma-sep.)</span></label>
               <input class="field-input" id="keywords" type="text" placeholder="AI, machine learning, 2025">
             </div>
@@ -965,6 +975,7 @@ const AGENT_IDS = AGENTS.map(a => a.id);
 let ws = null;
 let activeJobId = null;
 let pollTimer = null;
+let seenRunLogKeys = new Set();
 
 /* ─────────────────────────────────────────────────────────────────────
    Pipeline track
@@ -1014,6 +1025,7 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
         title:                  document.getElementById('topic').value,
         topic:                  document.getElementById('topic').value,
         content_type:           document.getElementById('content_type').value,
+        quality_mode:           document.getElementById('quality_mode').value,
         target_length:          parseInt(document.getElementById('target_length').value),
         keywords,
         language:               document.getElementById('language').value,
@@ -1035,8 +1047,8 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
 /* ─────────────────────────────────────────────────────────────────────
    Tracking
 ───────────────────────────────────────────────────────────────────────── */
-function startTracking(job) {
-  resetPipeline(job.id);
+function startTracking(job, resumed) {
+  resetPipeline(job.id, resumed ? 'Resumed running job' : 'Job dispatched to Celery worker');
   document.getElementById('result-section').classList.add('d-none');
 
   if (ws) { try { ws.close(); } catch {} }
@@ -1054,6 +1066,18 @@ function startTracking(job) {
 function handleWsMessage(data, jobId) {
   if (data.type === 'progress') {
     const idx = AGENT_IDS.indexOf(data.agent);
+    const status = data.status || 'completed';
+    if (status === 'running') {
+      markNodeActive(data.agent);
+      setProgress(Math.max(4, Math.round((Math.max(idx, 0)/AGENTS.length)*100)));
+      setStatusBadge('running');
+      const detail = data.detail || {};
+      const label = detail.heading ? ' - ' + detail.heading : '';
+      tlog('[' + data.agent + '] running' + label, 'accent');
+      loadJobs();
+      return;
+    }
+
     markNodeDone(data.agent, idx);
     setProgress(Math.round(((idx+1)/AGENTS.length)*100));
     setStatusBadge('running');
@@ -1079,6 +1103,9 @@ function handleWsMessage(data, jobId) {
       tlog('[section_writer] ' + (detail.heading || detail.section_kind || 'section') + ' — ~' + detail.word_count + ' words', 'success');
     } else if ((data.agent === 'join_draft' || data.agent === 'editor') && detail.word_count !== undefined) {
       tlog('[' + data.agent + '] Completed — ~' + detail.word_count + ' words', 'success');
+    } else if (data.agent === 'fact_checker' && detail.unverified_count !== undefined) {
+      const mode = detail.mode ? ' · ' + detail.mode : '';
+      tlog('[fact_checker] ' + (detail.claims_checked || 0) + ' claim(s), ' + detail.unverified_count + ' warning(s)' + mode, 'success');
     } else if (data.agent === 'coordinator_router' && detail.next_action !== undefined) {
       const target = detail.target_agent ? ' -> ' + detail.target_agent : '';
       tlog('[router] ' + (detail.next_action || 'approve') + target, 'accent');
@@ -1112,6 +1139,7 @@ async function pollJobStatus(jobId) {
     const resp = await fetch('/api/jobs/' + jobId + '/');
     if (!resp.ok) return;
     const job = await resp.json();
+    renderProgressFromJob(job);
     loadJobs();
     if (job.status === 'completed') {
       clearInterval(pollTimer);
@@ -1197,7 +1225,8 @@ async function fetchAndShowResult(jobId, qaScore) {
 /* ─────────────────────────────────────────────────────────────────────
    Pipeline UI helpers
 ───────────────────────────────────────────────────────────────────────── */
-function resetPipeline(jobId) {
+function resetPipeline(jobId, message) {
+  seenRunLogKeys = new Set();
   AGENT_IDS.forEach((id, i) => {
     const node = document.getElementById('node-' + id);
     if (node) node.className = 'pipeline-node';
@@ -1209,7 +1238,12 @@ function resetPipeline(jobId) {
   document.getElementById('terminal').innerHTML = '';
   document.getElementById('progress-job-id').textContent = '#' + jobId.slice(0,8);
   setStatusBadge('running');
-  tlog('Job dispatched to Celery worker', 'accent');
+  tlog(message || 'Job dispatched to Celery worker', 'accent');
+}
+
+function markNodeActive(agentId) {
+  const node = document.getElementById('node-' + agentId);
+  if (node && !node.classList.contains('done')) node.className = 'pipeline-node active';
 }
 
 function markNodeDone(agentId, idx) {
@@ -1233,6 +1267,42 @@ function setWsIndicator(state) {
   const [cls,label] = map[state] || map.idle;
   el.className = 'status-pill ' + cls + ' text-sm';
   el.textContent = label;
+}
+
+function renderProgressFromJob(job) {
+  const runs = job.agent_runs || [];
+  if (!runs.length) {
+    if (job.status === 'running') setStatusBadge('running');
+    return;
+  }
+
+  let completed = 0;
+  runs.forEach(run => {
+    const id = run.agent_type;
+    const idx = AGENT_IDS.indexOf(id);
+    if (idx < 0) return;
+
+    if (run.status === 'running') {
+      markNodeActive(id);
+    } else if (run.status === 'completed') {
+      markNodeDone(id, idx);
+      completed += 1;
+    } else if (run.status === 'failed') {
+      const node = document.getElementById('node-' + id);
+      if (node) node.className = 'pipeline-node error';
+    }
+
+    const key = run.id + ':' + run.status;
+    if (!seenRunLogKeys.has(key)) {
+      seenRunLogKeys.add(key);
+      const type = run.status === 'completed' ? 'success' : (run.status === 'failed' ? 'error' : 'accent');
+      tlog('[' + id + '] ' + run.status, type);
+    }
+  });
+
+  if (job.status === 'running') setStatusBadge('running');
+  const pct = Math.min(95, Math.max(4, Math.round((completed / Math.max(AGENTS.length, 1)) * 100)));
+  setProgress(pct);
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -1339,6 +1409,12 @@ async function loadJobs() {
         + '</td>'
         + '</tr>';
     }).join('');
+
+    const runningJob = jobs.find(j => j.status === 'running');
+    if (runningJob && !activeJobId) {
+      activeJobId = runningJob.id;
+      startTracking(runningJob, true);
+    }
 
     document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
   } catch {}

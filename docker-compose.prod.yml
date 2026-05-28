@@ -1,0 +1,86 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DEBUG: "False"
+      DATABASE_URL: postgres://content_user:content_pass@db:5432/content_pipeline
+      REDIS_URL: redis://redis:6379/0
+      CACHE_URL: redis://redis:6379/1
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CSRF_TRUSTED_ORIGINS: http://localhost:8000
+      APP_BASIC_AUTH_ENABLED: "True"
+      APP_BASIC_AUTH_USERNAME: ${APP_BASIC_AUTH_USERNAME:-admin}
+      APP_BASIC_AUTH_PASSWORD: ${APP_BASIC_AUTH_PASSWORD:-change-me}
+      LLM_PROVIDER: gemini
+      LLM_MODE: cheap
+      LOCAL_LLM_PROVIDER: gemini
+      STRUCTURED_LLM_PROVIDER: gemini
+      LLM_AGENT_PROVIDERS: ""
+      LLM_AGENT_MODELS: ""
+      PIPELINE_QUALITY_MODE: fast
+    command: bash scripts/start-web.sh
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DEBUG: "False"
+      DATABASE_URL: postgres://content_user:content_pass@db:5432/content_pipeline
+      REDIS_URL: redis://redis:6379/0
+      CACHE_URL: redis://redis:6379/1
+      CELERY_WORKER_POOL: solo
+      CELERY_WORKER_CONCURRENCY: "1"
+      LLM_PROVIDER: gemini
+      LLM_MODE: cheap
+      LOCAL_LLM_PROVIDER: gemini
+      STRUCTURED_LLM_PROVIDER: gemini
+      LLM_AGENT_PROVIDERS: ""
+      LLM_AGENT_MODELS: ""
+      PIPELINE_QUALITY_MODE: fast
+    command: bash scripts/start-worker.sh
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: content_pipeline
+      POSTGRES_USER: content_user
+      POSTGRES_PASSWORD: content_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U content_user -d content_pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

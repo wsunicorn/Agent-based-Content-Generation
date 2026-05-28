@@ -37,6 +37,14 @@ def _parse_env_mapping(value: str) -> dict[str, str]:
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+APP_BASIC_AUTH_ENABLED = env.bool("APP_BASIC_AUTH_ENABLED", default=False)
+APP_BASIC_AUTH_USERNAME = env("APP_BASIC_AUTH_USERNAME", default="admin")
+APP_BASIC_AUTH_PASSWORD = env("APP_BASIC_AUTH_PASSWORD", default="")
+APP_BASIC_AUTH_EXEMPT_PATHS = env.list(
+    "APP_BASIC_AUTH_EXEMPT_PATHS",
+    default=["/api/health/", "/static/", "/media/"],
+)
 
 # ---------------------------------------------------------------------------
 # Applications
@@ -161,11 +169,21 @@ REST_FRAMEWORK = {
 # ---------------------------------------------------------------------------
 # Django Channels (WebSocket)
 # ---------------------------------------------------------------------------
+REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+CACHE_URL = env("CACHE_URL", default=env("REDIS_CACHE_URL", default="redis://localhost:6379/1"))
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": CACHE_URL,
+    }
+}
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [env("REDIS_URL", default="redis://localhost:6379/0")],
+            "hosts": [REDIS_URL],
         },
     },
 }
@@ -179,7 +197,7 @@ if env.bool("USE_INMEMORY_CHANNEL_LAYER", default=False):
 # ---------------------------------------------------------------------------
 # Celery
 # ---------------------------------------------------------------------------
-CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_CACHE_BACKEND = "django-cache"
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -238,9 +256,19 @@ OLLAMA_REQUIRED_MODELS = env.list(
     ],
 )
 MAX_PARALLEL_WRITERS = env.int("MAX_PARALLEL_WRITERS", default=2)
+PIPELINE_QUALITY_MODE = env("PIPELINE_QUALITY_MODE", default="standard").lower()
 MAX_PIPELINE_REVISIONS = env.int("MAX_PIPELINE_REVISIONS", default=2)
 MAX_AGENT_RETRIES = env.int("MAX_AGENT_RETRIES", default=1)
 LANGGRAPH_RECURSION_LIMIT = env.int("LANGGRAPH_RECURSION_LIMIT", default=80)
+FACT_CHECK_MODE = env("FACT_CHECK_MODE", default="adaptive").lower()
+FACT_CHECK_MAX_CLAIMS = env.int("FACT_CHECK_MAX_CLAIMS", default=6)
+FACT_CHECK_SKIP_SOFT_CONTENT = env.bool("FACT_CHECK_SKIP_SOFT_CONTENT", default=True)
+FAST_MODE_WEB_SEARCH = env.bool("FAST_MODE_WEB_SEARCH", default=True)
+FAST_MODE_LLM_QA = env.bool("FAST_MODE_LLM_QA", default=True)
+FAST_MODE_LLM_SEO = env.bool("FAST_MODE_LLM_SEO", default=True)
+RESEARCH_MAX_SOURCES = env.int("RESEARCH_MAX_SOURCES", default=4)
+RESEARCH_CACHE_TTL = env.int("RESEARCH_CACHE_TTL", default=86400)
+SCRAPE_CACHE_TTL = env.int("SCRAPE_CACHE_TTL", default=604800)
 OPENAI_COMPATIBLE_BASE_URL = env(
     "OPENAI_COMPATIBLE_BASE_URL",
     default="http://localhost:1234/v1",

@@ -85,6 +85,7 @@ class PipelineState:
     job_id: str = ""
     topic: str = ""
     content_type: str = "blog_post"
+    quality_mode: str = "standard"    # fast | standard | strict
     target_length: int = 1500       # words
     keywords: list[str] = field(default_factory=list)
     additional_instructions: str = ""
@@ -131,6 +132,7 @@ class PipelineState:
     # ------------------------------------------------------------------ #
     fact_check_passed: bool = False
     unverified_claims: list[dict[str, Any]] = field(default_factory=list)
+    fact_check_report: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     # QA Agent output                                                      #

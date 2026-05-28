@@ -56,6 +56,13 @@ class Command(BaseCommand):
             help="Additional instructions for the agents",
         )
         parser.add_argument(
+            "--quality-mode",
+            type=str,
+            default="",
+            choices=["", "fast", "standard", "strict"],
+            help="Quality mode: fast, standard, or strict (default: settings value)",
+        )
+        parser.add_argument(
             "--async",
             dest="run_async",
             action="store_true",
@@ -70,11 +77,13 @@ class Command(BaseCommand):
         target_length = options["target_length"]
         keywords = [k.strip() for k in options["keywords"].split(",") if k.strip()]
         instructions = options["instructions"].strip()
+        quality_mode = options["quality_mode"] or getattr(settings, "PIPELINE_QUALITY_MODE", "standard")
         run_async = options["run_async"]
 
         self.stdout.write(self.style.MIGRATE_HEADING("=== Content Pipeline ==="))
         self.stdout.write(f"  Topic      : {topic}")
         self.stdout.write(f"  Type       : {content_type}")
+        self.stdout.write(f"  Quality    : {quality_mode}")
         self.stdout.write(f"  Length     : {target_length} words")
         self.stdout.write(f"  Keywords   : {keywords or 'none'}")
         self.stdout.write("")
@@ -84,6 +93,7 @@ class Command(BaseCommand):
             title=title,
             topic=topic,
             content_type=content_type,
+            quality_mode=quality_mode,
             target_length=target_length,
             keywords=keywords,
             additional_instructions=instructions,
@@ -113,21 +123,26 @@ class Command(BaseCommand):
 
         from apps.jobs.tasks import _save_artifacts, _save_revisions
         from apps.pipeline.graph import get_pipeline_graph
+        from apps.pipeline.quality import normalise_quality_mode, revision_limits
         from apps.pipeline.state import PipelineState
 
         job.status = Job.Status.RUNNING
         job.started_at = timezone.now()
         job.save(update_fields=["status", "started_at"])
 
+        quality_mode = normalise_quality_mode(getattr(job, "quality_mode", "standard"))
+        max_revisions, max_agent_retries = revision_limits(quality_mode)
+
         state = PipelineState(
             job_id=str(job.id),
             topic=job.topic,
             content_type=job.content_type,
+            quality_mode=quality_mode,
             target_length=job.target_length,
             keywords=job.keywords or [],
             additional_instructions=job.additional_instructions or "",
-            max_revisions=getattr(settings, "MAX_PIPELINE_REVISIONS", 2),
-            max_agent_retries=getattr(settings, "MAX_AGENT_RETRIES", 1),
+            max_revisions=max_revisions,
+            max_agent_retries=max_agent_retries,
         )
 
         try:

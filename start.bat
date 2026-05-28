@@ -41,14 +41,14 @@ if errorlevel 1 (
 
 echo.
 echo [3/4] Starting Celery worker...
-start "Celery Worker" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && celery -A config worker -l info -P solo"
+start "Celery Worker" cmd /k "cd /d %~dp0 && set DJANGO_SETTINGS_MODULE=config.settings.development && call .venv\Scripts\activate.bat && celery -A config worker -l info -P solo"
 
 echo Waiting for Celery to initialize...
 timeout /t 3 /nobreak >nul
 
 echo.
 echo [4/4] Starting Daphne ASGI server...
-start "Daphne Server" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && daphne -b 127.0.0.1 -p 8000 config.asgi:application"
+start "Daphne Server" cmd /k "cd /d %~dp0 && set DJANGO_SETTINGS_MODULE=config.settings.development && call .venv\Scripts\activate.bat && daphne -b 127.0.0.1 -p 8000 config.asgi:application"
 
 echo.
 echo ============================================================

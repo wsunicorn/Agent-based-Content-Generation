@@ -22,11 +22,22 @@ class Job(models.Model):
         NEWS_ARTICLE = "news_article", "News Article"
         TUTORIAL = "tutorial", "Tutorial"
 
+    class QualityMode(models.TextChoices):
+        FAST = "fast", "Fast"
+        STANDARD = "standard", "Standard"
+        STRICT = "strict", "Strict"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=500)
     topic = models.TextField(help_text="Primary topic / research question")
     content_type = models.CharField(
         max_length=30, choices=ContentType.choices, default=ContentType.BLOG_POST
+    )
+    quality_mode = models.CharField(
+        max_length=20,
+        choices=QualityMode.choices,
+        default=QualityMode.STANDARD,
+        help_text="Controls revision depth and fact-check strictness",
     )
     target_length = models.PositiveIntegerField(
         default=1500, help_text="Target word count"
@@ -80,9 +91,12 @@ class AgentRun(models.Model):
 
     class AgentType(models.TextChoices):
         COORDINATOR = "coordinator", "Coordinator"
+        COORDINATOR_ROUTER = "coordinator_router", "Coordinator Router"
         RESEARCH = "research", "Research"
         OUTLINE = "outline", "Outline"
         WRITER = "writer", "Writer"
+        SECTION_WRITER = "section_writer", "Section Writer"
+        JOIN_DRAFT = "join_draft", "Join Draft"
         EDITOR = "editor", "Editor"
         SEO = "seo", "SEO"
         FACT_CHECKER = "fact_checker", "Fact Checker"
@@ -131,6 +145,7 @@ class Artifact(models.Model):
         SEO_METADATA = "seo_metadata", "SEO Metadata"
         QA_REPORT = "qa_report", "QA Report"
         FACT_CHECK_REPORT = "fact_check_report", "Fact Check Report"
+        SOURCE_DOCUMENTS = "source_documents", "Source Documents"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="artifacts")
