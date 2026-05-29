@@ -1,7 +1,9 @@
 """API views for the jobs app."""
 import io
+import html as html_lib
 import re
 import textwrap
+from urllib.parse import urlparse
 
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -38,6 +40,20 @@ def _normalise_create_payload(request):
     return data
 
 
+def _revoke_job_task(job) -> bool:
+    if not job.celery_task_id:
+        return False
+    if job.status not in (Job.Status.PENDING, Job.Status.RUNNING, Job.Status.PAUSED):
+        return False
+    try:
+        from config.celery import app as celery_app
+
+        celery_app.control.revoke(job.celery_task_id, terminate=True)
+        return True
+    except Exception:
+        return False
+
+
 @api_view(["GET", "POST"])
 def job_list_create(request):
     if request.method == "GET":
@@ -69,14 +85,7 @@ def job_list_create(request):
 def job_detail(request, pk):
     job = get_object_or_404(Job, pk=pk)
     if request.method == "DELETE":
-        # Revoke Celery task if still running
-        if job.celery_task_id and job.status in (Job.Status.PENDING, Job.Status.RUNNING):
-            try:
-                from celery.app.control import Control
-                from config.celery import app as celery_app
-                celery_app.control.revoke(job.celery_task_id, terminate=True)
-            except Exception:
-                pass
+        _revoke_job_task(job)
         job.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     serializer = JobDetailSerializer(job)
@@ -93,7 +102,7 @@ def job_update_content(request, pk):
 
     artifact = (
         job.artifacts.filter(artifact_type=Artifact.ArtifactType.FINAL_CONTENT)
-        .order_by("-version").first()
+        .order_by("-version", "-created_at").first()
     )
     if not artifact:
         return Response({"detail": "Final content artifact not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -108,7 +117,9 @@ def job_update_content(request, pk):
 def job_artifact(request, pk, artifact_type):
     job = get_object_or_404(Job, pk=pk)
     artifact = (
-        job.artifacts.filter(artifact_type=artifact_type).order_by("-version").first()
+        job.artifacts.filter(artifact_type=artifact_type)
+        .order_by("-version", "-created_at")
+        .first()
     )
     if not artifact:
         return Response(
@@ -278,10 +289,14 @@ def _normalise_outline_sections(raw_sections):
         key_points = item.get("key_points") or []
         if isinstance(key_points, str):
             key_points = [line.strip("- ").strip() for line in key_points.splitlines()]
+        try:
+            level = int(item.get("level") or 1)
+        except (TypeError, ValueError):
+            level = 1
         sections.append(
             {
                 "heading": heading[:180],
-                "level": int(item.get("level") or 1),
+                "level": max(1, min(level, 4)),
                 "brief": brief[:1000],
                 "key_points": [str(point).strip() for point in key_points if str(point).strip()][:8],
                 "template_role": str(item.get("template_role") or "").strip()[:120],
@@ -308,9 +323,10 @@ def job_cancel(request, pk):
             {"detail": "Job cannot be cancelled in its current state."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    revoked = _revoke_job_task(job)
     job.status = Job.Status.CANCELLED
     job.save(update_fields=["status"])
-    return Response({"detail": "Job cancelled."})
+    return Response({"detail": "Job cancelled.", "task_revoked": revoked})
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +360,7 @@ def job_export(request, pk):
     # Fetch artifacts
     final_artifact = (
         job.artifacts.filter(artifact_type=Artifact.ArtifactType.FINAL_CONTENT)
-        .order_by("-version").first()
+        .order_by("-version", "-created_at").first()
     )
     if not final_artifact or not final_artifact.content_text:
         return Response(
@@ -354,15 +370,15 @@ def job_export(request, pk):
 
     seo_artifact = (
         job.artifacts.filter(artifact_type=Artifact.ArtifactType.SEO_METADATA)
-        .order_by("-version").first()
+        .order_by("-version", "-created_at").first()
     )
     qa_artifact = (
         job.artifacts.filter(artifact_type=Artifact.ArtifactType.QA_REPORT)
-        .order_by("-version").first()
+        .order_by("-version", "-created_at").first()
     )
     image_artifact = (
         job.artifacts.filter(artifact_type=Artifact.ArtifactType.IMAGE_ASSETS)
-        .order_by("-version").first()
+        .order_by("-version", "-created_at").first()
     )
 
     content = final_artifact.content_text
@@ -371,7 +387,8 @@ def job_export(request, pk):
     image_refs = _image_references(image_artifact)
 
     slug = seo.get("slug") or re.sub(r"[^a-z0-9]+", "-", job.title.lower())[:60]
-    filename_base = slug.strip("-")
+    filename_base = re.sub(r"[^A-Za-z0-9._-]+", "-", str(slug)).strip(".-")
+    filename_base = filename_base or f"job-{job.id}"
 
     if fmt == "markdown":
         md = _build_markdown(job, content, seo, qa_score, image_refs)
@@ -413,23 +430,23 @@ def _image_source_markdown(image_refs):
         url = item.get("url") or ""
         source = item.get("source_url") or url
         alt_text = item.get("alt_text") or title
-        
+
         if url:
             lines.append(f"![{alt_text}]({url})")
-        
+
         caption_parts = []
         if item.get("caption"):
             caption_parts.append(f"**{item.get('caption')}**")
         else:
             caption_parts.append(f"**{title}**")
-            
+
         if item.get("license"):
             caption_parts.append(f"License: {item.get('license')}")
         if item.get("attribution"):
             caption_parts.append(f"Attribution: {item.get('attribution')}")
         if source:
             caption_parts.append(f"[Source link]({source})")
-            
+
         lines.append(" - ".join(caption_parts))
         lines.append("")
     return "\n".join(lines) + "\n"
@@ -437,9 +454,9 @@ def _image_source_markdown(image_refs):
 
 def _build_markdown(job, content, seo, qa_score, image_refs=None):
     meta_title = seo.get("meta_title", job.title)
-    meta_desc  = seo.get("meta_description", "")
-    focus_kw   = seo.get("focus_keyword", "")
-    date_str   = (job.completed_at or timezone.now()).strftime("%Y-%m-%d")
+    meta_desc = seo.get("meta_description", "")
+    focus_kw = seo.get("focus_keyword", "")
+    date_str = (job.completed_at or timezone.now()).strftime("%Y-%m-%d")
 
     header = textwrap.dedent(f"""\
         ---
@@ -462,14 +479,16 @@ def _build_markdown(job, content, seo, qa_score, image_refs=None):
 def _build_html(job, content, seo, qa_score, image_refs=None):
     import markdown2
     meta_title = seo.get("meta_title", job.title)
-    meta_desc  = seo.get("meta_description", "")
-    focus_kw   = seo.get("focus_keyword", "")
-    date_str   = (job.completed_at or timezone.now()).strftime("%B %d, %Y")
+    meta_desc = seo.get("meta_description", "")
+    focus_kw = seo.get("focus_keyword", "")
+    date_str = (job.completed_at or timezone.now()).strftime("%B %d, %Y")
 
+    markdown_text = _escape_raw_html(content + _image_source_markdown(image_refs or []))
     body_html = markdown2.markdown(
-        content + _image_source_markdown(image_refs or []),
+        markdown_text,
         extras=["fenced-code-blocks", "tables", "header-ids"],
     )
+    body_html = _sanitize_rendered_html(body_html)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -515,6 +534,41 @@ def _build_html(job, content, seo, qa_score, image_refs=None):
 </html>"""
 
 
+def _escape_raw_html(markdown_text: str) -> str:
+    return html_lib.escape(str(markdown_text or ""), quote=False)
+
+
+def _is_safe_url(value: str) -> bool:
+    value = str(value or "").strip()
+    if not value:
+        return False
+    parsed = urlparse(value)
+    if parsed.scheme:
+        return parsed.scheme.lower() in {"http", "https", "mailto"}
+    return not value.startswith("//")
+
+
+def _sanitize_rendered_html(rendered_html: str) -> str:
+    def replace_url(match):
+        attr, quote, raw_url = match.groups()
+        url = html_lib.unescape(raw_url).strip()
+        safe_url = url if _is_safe_url(url) else "#"
+        return f"{attr}={quote}{html_lib.escape(safe_url, quote=True)}{quote}"
+
+    rendered_html = re.sub(
+        r"\b(href|src)=([\"'])(.*?)\2",
+        replace_url,
+        rendered_html,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r"<a\b(?![^>]*\brel=)",
+        '<a rel="noopener noreferrer"',
+        rendered_html,
+        flags=re.IGNORECASE,
+    )
+
+
 def _build_docx(job, content, seo, qa_score, image_refs=None):
     from docx import Document
     from docx.shared import Inches, Pt, RGBColor
@@ -522,18 +576,15 @@ def _build_docx(job, content, seo, qa_score, image_refs=None):
 
     doc = Document()
 
-    # Page margins
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
     section = doc.sections[0]
-    section.top_margin    = Inches(1)
+    section.top_margin = Inches(1)
     section.bottom_margin = Inches(1)
-    section.left_margin   = Inches(1.25)
-    section.right_margin  = Inches(1.25)
+    section.left_margin = Inches(1.25)
+    section.right_margin = Inches(1.25)
 
     meta_title = seo.get("meta_title", job.title)
-    focus_kw   = seo.get("focus_keyword", "")
-    date_str   = (job.completed_at or timezone.now()).strftime("%B %d, %Y")
+    focus_kw = seo.get("focus_keyword", "")
+    date_str = (job.completed_at or timezone.now()).strftime("%B %d, %Y")
 
     # Document title
     title_para = doc.add_paragraph()
@@ -561,11 +612,11 @@ def _build_docx(job, content, seo, qa_score, image_refs=None):
             doc.add_paragraph()
             continue
         if stripped.startswith("### "):
-            p = doc.add_paragraph(stripped[4:], style="Heading 3")
+            doc.add_paragraph(stripped[4:], style="Heading 3")
         elif stripped.startswith("## "):
-            p = doc.add_paragraph(stripped[3:], style="Heading 2")
+            doc.add_paragraph(stripped[3:], style="Heading 2")
         elif stripped.startswith("# "):
-            p = doc.add_paragraph(stripped[2:], style="Heading 1")
+            doc.add_paragraph(stripped[2:], style="Heading 1")
         elif stripped.startswith(("- ", "* ")):
             doc.add_paragraph(stripped[2:], style="List Bullet")
         elif re.match(r"^\d+\. ", stripped):
@@ -611,7 +662,7 @@ def _add_inline_formatted(para, text):
 
 def _esc(s):
     """Minimal HTML escaping for attributes."""
-    return str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    return html_lib.escape(str(s), quote=True)
 
 
 # ---------------------------------------------------------------------------
@@ -624,14 +675,14 @@ def analytics_summary(request):
     GET /api/analytics/
     Returns aggregate stats about all jobs.
     """
-    from django.db.models import Avg, Count, Sum, F, ExpressionWrapper, DurationField
+    from django.db.models import Count, Sum
     from django.db.models.functions import TruncDate
 
     jobs = Job.objects.all()
-    total       = jobs.count()
-    completed   = jobs.filter(status=Job.Status.COMPLETED).count()
-    failed      = jobs.filter(status=Job.Status.FAILED).count()
-    running     = jobs.filter(status=Job.Status.RUNNING).count()
+    total = jobs.count()
+    completed = jobs.filter(status=Job.Status.COMPLETED).count()
+    failed = jobs.filter(status=Job.Status.FAILED).count()
+    running = jobs.filter(status=Job.Status.RUNNING).count()
 
     # Average QA score from QA_REPORT artifacts
     qa_scores = list(

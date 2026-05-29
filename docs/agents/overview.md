@@ -1,87 +1,65 @@
-# Tổng Quan Các AI Agent (AI Agents Overview)
+# Agents Overview
 
-Tài liệu này cung cấp sơ đồ tương tác, danh sách nhiệm vụ chi tiết và nguyên lý hoạt động của 12 AI Agent chuyên biệt phối hợp hoạt động trong hệ thống **Domain LLM Assistant**.
+Agent code nằm trong `apps/agents/`. Mỗi agent nhận `PipelineState`, cập nhật một phần state và trả state mới.
 
----
+## Danh Sách Agent
 
-## 1. Bản Đồ Tương Tác Các Tác Nhân (Agent Interaction Map)
+| Agent | File | Gọi LLM | Vai trò |
+| --- | --- | --- | --- |
+| Coordinator | [coordinator.py](../../apps/agents/coordinator.py) | Có | Chuẩn hóa metadata và router quyết định bước kế tiếp. |
+| ImageResearch | [image_research.py](../../apps/agents/image_research.py) | Không bắt buộc | Tìm ảnh Wikimedia/Tavily, tạo `image_assets`. |
+| Research | [research.py](../../apps/agents/research.py) | Có | Tìm nguồn, scrape và tóm tắt research. |
+| Outline | [outline.py](../../apps/agents/outline.py) | Có | Sinh outline structured theo content type/domain. |
+| Writer | [writer.py](../../apps/agents/writer.py) | Không | Chia outline thành các `SectionWriteTask`. |
+| SectionWriter | [section_writer.py](../../apps/agents/section_writer.py) | Có | Viết từng section độc lập. |
+| JoinDraft | [join_draft.py](../../apps/agents/join_draft.py) | Không | Ghép sections, chèn ảnh, tạo draft. |
+| Editor | [editor.py](../../apps/agents/editor.py) | Có | Biên tập draft. |
+| FactChecker | [fact_checker.py](../../apps/agents/fact_checker.py) | Có | Kiểm chứng claim dựa trên sources. |
+| SEO | [seo.py](../../apps/agents/seo.py) | Có | Sinh metadata SEO và chấm điểm SEO. |
+| QA | [qa.py](../../apps/agents/qa.py) | Có | Chấm chất lượng cuối và đề xuất next action. |
 
-Dưới đây là luồng xử lý và trao đổi dữ liệu thời gian thực giữa các tác nhân thông qua LangGraph State Machine:
+## Shared BaseAgent
 
-```
-                            ┌─────────────────┐
-                            │   Coordinator   │ ← Khởi tạo tham số đầu vào
-                            └────────┬────────┘
-                                     │
-                            ┌────────▼────────┐
-                            │ Image Research  │ ← Tìm kiếm hình ảnh Wikimedia
-                            └────────┬────────┘
-                                     │
-                            ┌────────▼────────┐
-                            │ Research Agent  │ ← Tìm kiếm tài liệu, cào web Tavily
-                            └────────┬────────┘
-                                     │
-                            ┌────────▼────────┐
-                            │  Outline Agent  │ ← Thiết lập cấu trúc dàn bài
-                            └────────┬────────┘
-                                     │ (Chờ duyệt và phân bổ H2/H3)
-                            ┌────────▼────────┐
-                            │  Writer Agent   │ ← Lập kế hoạch phân chia section
-                            └────────┬────────┘
-                                     │ (Rẽ nhánh viết song song bằng Celery)
-               ┌─────────────────────┼─────────────────────┐
-               │                     │                     │
-      ┌────────▼────────┐   ┌────────▼────────┐   ┌────────▼────────┐
-      │ Section Writer  │   │ Section Writer  │   │ Section Writer  │ (Section 1..N)
-      └────────┬────────┘   └────────┬────────┘   └────────┬────────┘
-               │                     │                     │
-               └─────────────────────┼─────────────────────┘
-                                     │ (Ghép nối và tự động chèn ảnh)
-                            ┌────────▼────────┐
-                            │   Join Draft    │
-                            └────────┬────────┘
-                                     │
-                            ┌────────▼────────┐
-                            │  Editor Agent   │ ← Biên tập, mượt hóa văn phong
-                            └────────┬────────┘
-                                     │
-                            ┌────────▼────────┐
-                            │  Coord Router   │ ◄───────┐
-                            └────────┬────────┘         │
-             ┌───────────────────────┼──────────────────┼────┐
-             ▼                       ▼                  ▼    │ (Nếu QA chấm dưới 75)
-      ┌──────────────┐        ┌──────────────┐   ┌───────────┴──┐
-      │ Fact-Checker │        │  SEO Agent   │   │   QA Agent   │
-      │ (Kiểm chứng) │        │ (Tối ưu SEO) │   │ (Đánh giá QA)│
-      └──────────────┘        └──────────────┘   └──────────────┘
-```
+[base.py](../../apps/agents/base.py) cung cấp:
 
----
+- chọn provider theo `LLM_PROVIDER`, `LLM_MODE`, agent override;
+- retry với backoff;
+- fallback từ local provider sang Gemini nếu `LLM_FALLBACK_TO_GEMINI=True`;
+- tracking usage theo provider.
 
-## 2. Danh Sách Chi Tiết 12 AI Agent
+## Provider Adapters
 
-| Tên Agent | Tệp Mã Nguồn | LLM Mặc Định | Nhiệm Vụ & Vai Trò Chính |
-| :--- | :--- | :--- | :--- |
-| **Coordinator** | `apps/agents/coordinator.py` | — (Python) | Đọc cấu hình đầu vào, thiết lập các ranh giới chất lượng (`quality_mode`), chuẩn hóa tham số. |
-| **Image Research** | `apps/agents/image_research.py`| — (Python API) | Tìm kiếm ảnh liên quan từ Wikimedia Commons, trích xuất giấy phép sử dụng (`license`) và bản quyền tác giả. |
-| **Research** | `apps/agents/research.py` | `qwen3:8b` / Gemini | Gửi truy vấn thông minh đến Tavily Search, scrape nội dung thô và tổng hợp các facts đắt giá. |
-| **Outline** | `apps/agents/outline.py` | `qwen2.5:7b` / Gemini| Chọn template mẫu theo `content_type` và lập dàn ý chi tiết các phần, phân bổ từ mục tiêu. |
-| **Writer** | `apps/agents/writer.py` | `qwen3:8b` / Gemini | Lập kế hoạch viết bài, chuyển đổi dàn bài thành danh sách các nhiệm vụ viết riêng biệt (`writer_tasks`). |
-| **Section Writer** | `apps/agents/section_writer.py`| `qwen3:8b` / Gemini | Viết nội dung thô cho duy nhất một phần được giao theo đúng giọng văn, từ khóa và đối tượng độc giả. |
-| **Join Draft** | `apps/agents/join_draft.py` | — (Python) | Ghép nối các phần thô do các section writers viết, tự động tính toán vị trí chèn ảnh minh họa thích hợp. |
-| **Editor** | `apps/agents/editor.py` | `qwen3:8b` / Gemini | Chỉnh sửa ngữ pháp, đồng bộ phong cách viết, cắt bỏ từ rác dư thừa và tối ưu hóa số từ mục tiêu. |
-| **Coord Router** | `apps/agents/coordinator.py` | — (Python) | Đóng vai trò là "Bộ điều khiển trung tâm" sau các cổng chất lượng, phân tích lỗi và định tuyến các chu kỳ sửa bài. |
-| **Fact-Checker** | `apps/agents/fact_checker.py` | `qwen3:8b` / Gemini | Trích xuất các tuyên bố thực tế trong bài viết và xác minh tính chính xác so với tài liệu nghiên cứu gốc. |
-| **SEO** | `apps/agents/seo.py` | `qwen2.5:7b` / Gemini| Tính điểm SEO (Keyword Density, Heading chuẩn, Alt ảnh) và tự động sinh Meta Title/Description, URL Slug. |
-| **QA** | `apps/agents/qa.py` | `qwen3:8b` / Gemini | Chấm điểm bài viết trên thang điểm 100 dựa theo 5 tiêu chí khoa học, quyết định thông duyệt bài hay sửa đổi. |
+[llm_providers.py](../../apps/agents/llm_providers.py) hỗ trợ:
 
----
+- Gemini qua `langchain-google-genai`;
+- Ollama qua HTTP API `/api/chat`;
+- OpenAI-compatible local server, ví dụ LM Studio.
 
-## 3. Lớp Nền Tảng Tác Nhân (`BaseAgent` Class)
+Structured output dùng Pydantic schema. Local providers nhận thêm JSON schema instruction và parse JSON trả về.
 
-Tất cả các Agent trong thư mục `apps/agents/` đều bắt buộc phải kế thừa lớp cơ sở `BaseAgent` (`apps/agents/base.py`) để được kế thừa các cơ chế hạ tầng mạnh mẽ:
+## Domain Và Content Guides
 
-1. **Định tuyến Mô Hình Thông Minh (`_select_provider_name`):** Tự động phát hiện chế độ hoạt động (`LLM_MODE`) và chuyển hướng nhiệm vụ sang Ollama Local (đối với viết prose văn bản dài) hoặc Google Gemini (đối với định dạng JSON cấu trúc).
-2. **Tự Động Thử Lại Có Giãn Cách (`tenacity` retry wrapper):** Tự động gọi lại LLM khi gặp lỗi kết nối hoặc rate-limit, áp dụng cơ chế giãn cách tăng lũy thừa (`wait_exponential`) tối đa 3 lần.
-3. **Cơ Chế Khôi Phục Fallback:** Khi Ollama cục bộ bị quá tải tài nguyên dẫn đến treo dịch vụ, tác nhân sẽ tự động chuyển hướng cuộc gọi sang Gemini free-tier để đảm bảo bài viết hoàn thành trọn vẹn.
-4. **Theo Dõi Tài Nguyên Thời Gian Thực (`_track_usage`):** Lưu trữ chính xác số lần gọi LLM của từng tác nhân theo thời gian thực và ghi nhận vào mô hình `AgentRun` trong cơ sở dữ liệu.
+- [domain_guides.py](../../apps/agents/domain_guides.py): quy tắc theo lĩnh vực như healthcare, finance, legal.
+- [content_guides.py](../../apps/agents/content_guides.py): cấu trúc khác nhau cho blog post, technical report, news article, tutorial.
+
+Các guide này giúp prompt không chung chung và giúp QA/Editor biết tiêu chí của từng loại nội dung.
+
+## AgentRun Logging
+
+LangGraph wrapper trong [apps/pipeline/graph.py](../../apps/pipeline/graph.py) gọi:
+
+- `start_agent_run`
+- `complete_agent_run`
+- `fail_agent_run`
+
+Các helper này nằm trong [apps/jobs/progress.py](../../apps/jobs/progress.py), dùng để ghi log vào `AgentRun` và thống kê usage.
+
+## Khi Thêm Agent Mới
+
+1. Tạo file agent trong `apps/agents/`.
+2. Kế thừa `BaseAgent`.
+3. Thêm enum vào `AgentRun.AgentType` nếu cần lưu log.
+4. Thêm field cần thiết vào `PipelineState`.
+5. Thêm node/edge trong `apps/pipeline/graph.py`.
+6. Thêm artifact nếu agent tạo output cần lưu lâu dài.
+7. Cập nhật docs và test.

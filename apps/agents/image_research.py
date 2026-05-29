@@ -10,9 +10,8 @@ import logging
 import re
 from urllib.parse import quote_plus
 
-import httpx
-from pydantic import BaseModel, Field
 from django.conf import settings
+import httpx
 
 from apps.pipeline.state import ImageAsset, PipelineState, SourceDocument
 
@@ -22,12 +21,6 @@ from .domain_guides import get_domain_search_terms
 logger = logging.getLogger(__name__)
 
 COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
-
-
-class ImageSearchQueries(BaseModel):
-    queries: list[str] = Field(
-        description="A list of 3-4 precise, English search queries (max 3 words each) to find visually relevant images. Optimize for Wikimedia Commons search.",
-    )
 
 
 class ImageResearchAgent(BaseAgent):
@@ -95,35 +88,17 @@ class ImageResearchAgent(BaseAgent):
         return state
 
     def _query_candidates(self, state: PipelineState) -> list[str]:
-        system_prompt = (
-            "You are an expert image researcher. Your task is to analyze the given topic and keywords "
-            "and produce 3-4 highly effective search queries to find relevant images on Wikimedia Commons.\n"
-            "- Extract the core visual subject.\n"
-            "- Translate concepts to English if necessary.\n"
-            "- Avoid abstract concepts; focus on tangible objects, software logos, or people.\n"
-            "- Keep each query extremely short (max 2-4 words)."
-        )
-        user_prompt = f"Topic: {state.topic}\nKeywords: {', '.join(state.keywords[:3])}"
+        topic = self._clean_query(state.topic)
+        keywords = [self._clean_query(kw) for kw in state.keywords[:3] if kw]
+        domain_terms = self._clean_query(get_domain_search_terms(getattr(state, "domain", "")))
 
-        try:
-            response = self._call_llm(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                output_schema=ImageSearchQueries
-            )
-            candidates = response.queries
-            # Also keep the fallback naive query just in case
-            candidates.append(self._build_query(state))
-        except Exception as exc:
-            logger.warning("[ImageResearchAgent] Failed to generate smart queries, falling back to naive: %s", exc)
-            topic = self._clean_query(state.topic)
-            keywords = [self._clean_query(kw) for kw in state.keywords[:3] if kw]
-            candidates = [
-                " ".join([topic, *keywords[:1]]).strip(),
-                topic,
-                " ".join(keywords[:2]).strip(),
-                self._build_query(state),
-            ]
+        candidates = [
+            " ".join([topic, *keywords[:1]]).strip(),
+            topic,
+            " ".join(keywords[:2]).strip(),
+            self._build_query(state),
+            domain_terms,
+        ]
 
         unique_candidates: list[str] = []
         seen: set[str] = set()

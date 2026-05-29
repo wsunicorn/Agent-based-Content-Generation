@@ -498,9 +498,11 @@ function mdToHtml(md) {
     // italic
     .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
     // images
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) =>
+      '<img src="' + attr(safeUrl(url)) + '" alt="' + attr(alt) + '" loading="lazy">')
     // links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) =>
+      '<a href="' + attr(safeUrl(url)) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
 
   // lists
   const lines = html.split('\n');
@@ -536,7 +538,28 @@ function mdToHtml(md) {
   return html;
 }
 
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s){
+  return String(s||'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+function attr(s) {
+  return esc(s).replace(/'/g,'&#39;');
+}
+function safeUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '#';
+  if (value.startsWith('/') && !value.startsWith('//')) return value;
+  if (value.startsWith('#')) return value;
+  try {
+    const url = new URL(value, window.location.origin);
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.href : '#';
+  } catch {
+    return '#';
+  }
+}
 
 /* ── Load article content ── */
 async function loadArticle() {

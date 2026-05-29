@@ -31,6 +31,7 @@ def _parse_env_mapping(value: str) -> dict[str, str]:
             mapping[key] = raw_value
     return mapping
 
+
 # ---------------------------------------------------------------------------
 # Security
 # ---------------------------------------------------------------------------
@@ -191,7 +192,8 @@ CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=True)
 CELERY_TASK_TIME_LIMIT = 3600  # 1 hour hard limit
 CELERY_TASK_SOFT_TIME_LIMIT = 3300  # warn at 55 minutes
-CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+LOGIN_URL = "/admin/login/"
 
 # ---------------------------------------------------------------------------
 # LLM providers

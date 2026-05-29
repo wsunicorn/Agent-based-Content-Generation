@@ -1,213 +1,116 @@
-# Sơ đồ Cơ sở Dữ liệu (Database Schema)
+# Database Schema
 
-Tài liệu này mô tả chi tiết sơ đồ cơ sở dữ liệu và các Django model trong dự án **Domain LLM Assistant**, đại diện cho cấu trúc lưu trữ của hệ thống tạo nội dung multi-agent.
+Models chính nằm trong [apps/jobs/models.py](../apps/jobs/models.py).
 
----
+## Job
 
-## 1. Mối quan hệ giữa các thực thể (Entity Relationship Overview)
+`Job` là đơn vị công việc lớn nhất: một lần tạo bài viết.
 
-```
- auth_user (Django User)
-      │
-      ▼
-     Job 
-      ├───< AgentRun (Log chi tiết các bước chạy của agent)
-      ├───< Artifact (Các tệp/kết quả trung gian và cuối cùng)
-      └───< Revision (Các chu kỳ phản hồi và sửa đổi bài viết)
-```
+Trường quan trọng:
 
----
+| Field | Kiểu | Ý nghĩa |
+| --- | --- | --- |
+| `id` | UUID | Primary key, cũng dùng trong API/WebSocket. |
+| `title` | CharField | Tiêu đề hiển thị. |
+| `topic` | TextField | Chủ đề hoặc câu hỏi nghiên cứu. |
+| `content_type` | choices | `blog_post`, `technical_report`, `news_article`, `tutorial`. |
+| `domain` | choices | `tech`, `marketing`, `education`, `finance`, `healthcare`, `legal`. |
+| `audience` | CharField | Độc giả mục tiêu. |
+| `tone` | choices | Giọng văn mong muốn. |
+| `quality_mode` | choices | `fast`, `standard`, `strict`. |
+| `target_length` | PositiveIntegerField | Số từ mục tiêu. |
+| `keywords` | JSONField | Danh sách từ khóa. |
+| `language` | CharField | Ngôn ngữ đầu ra. |
+| `additional_instructions` | TextField | Hướng dẫn thêm cho agent. |
+| `outline_review_required` | BooleanField | Có pause để duyệt outline hay không. |
+| `approved_outline` | JSONField | Outline đã được user approve/chỉnh. |
+| `outline_approved_at` | DateTimeField | Thời điểm approve outline. |
+| `pipeline_state` | JSONField | Checkpoint resumable của LangGraph. |
+| `status` | choices | `pending`, `running`, `paused`, `completed`, `failed`, `cancelled`. |
+| `celery_task_id` | CharField | Task id hiện tại. |
+| `error_message` | TextField | Lỗi cuối nếu job failed. |
+| `llm_calls_count` | PositiveIntegerField | Tổng số lần gọi LLM. |
+| `llm_tokens_used` | PositiveIntegerField | Tổng token nếu provider trả về. |
+| `llm_usage_by_provider` | JSONField | Usage theo provider, ví dụ `{"ollama": {"calls": 10}}`. |
 
-## 2. Các Django Model Chi Tiết (`apps/jobs/models.py`)
+## AgentRun
 
-### 2.1 Job
+`AgentRun` ghi log từng node/agent trong một job.
 
-Model `Job` lưu trữ thông tin về một yêu cầu tạo bài viết/báo cáo từ phía người dùng. Đây là điểm bắt đầu (entry point) của toàn bộ pipeline.
+| Field | Ý nghĩa |
+| --- | --- |
+| `job` | Job cha. |
+| `agent_type` | Agent đã chạy, ví dụ `research`, `section_writer`, `qa`. |
+| `status` | `pending`, `running`, `completed`, `failed`, `skipped`. |
+| `attempt` | Lần thử. |
+| `error_message` | Lỗi nếu agent fail. |
+| `prompt_snapshot` | Prompt snapshot để debug. |
+| `response_snapshot` | Response snapshot để debug. |
+| `provider` | Provider LLM dùng trong lần chạy. |
+| `llm_calls_count` | Số call phát sinh. |
+| `input_tokens`, `output_tokens` | Token nếu provider hỗ trợ. |
 
-* **Các trường trạng thái (`Status`):**
-  * `pending`: Đang chờ xử lý.
-  * `running`: Đang chạy pipeline.
-  * `paused`: Đang tạm dừng (ví dụ: chờ người dùng duyệt dàn ý outline).
-  * `completed`: Đã hoàn thành.
-  * `failed`: Thất bại.
-  * `cancelled`: Bị hủy bởi người dùng.
+## Artifact
 
-* **Các loại nội dung (`ContentType`):**
-  * `blog_post`: Bài viết Blog (Blog Post).
-  * `technical_report`: Báo cáo Kỹ thuật (Technical Report).
-  * `news_article`: Tin tức (News Article).
-  * `tutorial`: Hướng dẫn (Tutorial).
+`Artifact` lưu đầu ra từng giai đoạn. Artifact không ghi đè bản cũ; mỗi lần pipeline chạy hoàn chỉnh hoặc resume tạo bản mới với `version` tăng.
 
-* **Các chế độ chất lượng (`QualityMode`):**
-  * `fast`: Nhanh (bỏ qua một số bước QA/Fact-checking chuyên sâu).
-  * `standard`: Tiêu chuẩn (cân bằng giữa chi phí, thời gian và chất lượng).
-  * `strict`: Nghiêm ngặt (tối đa hóa chất lượng, kiểm tra thực tế chặt chẽ, cho phép nhiều revision).
+Các loại artifact:
 
-* **Các lĩnh vực hỗ trợ (`Domain`):**
-  * `tech`: Công nghệ.
-  * `marketing`: Tiếp thị.
-  * `education`: Giáo dục.
-  * `finance`: Tài chính.
-  * `healthcare`: Y tế/Sức khỏe.
-  * `legal`: Pháp lý.
+- `research_summary`
+- `outline`
+- `draft`
+- `edited_draft`
+- `final_content`
+- `seo_metadata`
+- `qa_report`
+- `fact_check_report`
+- `source_documents`
+- `image_assets`
 
-* **Giọng văn (`Tone`):**
-  * `clear`: Rõ ràng.
-  * `professional`: Chuyên nghiệp.
-  * `practical`: Thực tế.
-  * `executive`: Điều hành/Báo cáo cấp cao.
-  * `friendly`: Thân thiện.
-  * `formal`: Trang trọng.
+Trường quan trọng:
 
-#### Chi tiết các thuộc tính của model `Job`:
+| Field | Ý nghĩa |
+| --- | --- |
+| `artifact_type` | Loại artifact. |
+| `content_text` | Nội dung dạng text/markdown. |
+| `content_json` | Nội dung structured. |
+| `word_count` | Số từ nếu có. |
+| `version` | Phiên bản trong cùng job và artifact type. |
+| `created_at` | Thời điểm tạo. |
 
-| Tên trường | Kiểu dữ liệu | Thuộc tính | Mô tả |
-| :--- | :--- | :--- | :--- |
-| `id` | `UUIDField` | `primary_key=True` | Định danh duy nhất dạng UUID. |
-| `title` | `CharField(500)` | | Tiêu đề bài viết được tạo ra. |
-| `topic` | `TextField` | | Chủ đề hoặc câu hỏi nghiên cứu ban đầu. |
-| `content_type` | `CharField(30)` | `default="blog_post"` | Định dạng loại bài viết. |
-| `domain` | `CharField(30)` | `default="tech"` | Lĩnh vực hướng dẫn cho các agent. |
-| `audience` | `CharField(120)` | `blank=True` | Đối tượng độc giả mục tiêu (ví dụ: lập trình viên, giám đốc). |
-| `tone` | `CharField(30)` | `default="clear"` | Giọng điệu chủ đạo của bài viết. |
-| `quality_mode` | `CharField(20)` | `default="standard"` | Cấu hình kiểm soát chất lượng và số vòng sửa lỗi. |
-| `target_length` | `PositiveIntegerField`| `default=1500` | Số lượng từ mục tiêu mong muốn. |
-| `keywords` | `JSONField` | `default=list` | Danh sách từ khóa SEO mong muốn. |
-| `language` | `CharField(50)` | `default="English"` | Ngôn ngữ bài viết (English, Vietnamese, French, etc.). |
-| `additional_instructions`| `TextField` | `blank=True` | Yêu cầu hoặc hướng dẫn thêm từ người dùng. |
-| `outline_review_required`| `BooleanField` | `default=True` | Bật/tắt chế độ dừng duyệt dàn ý (Outline Review) từ người dùng. |
-| `approved_outline` | `JSONField` | `default=list` | Dàn ý chi tiết đã được người dùng duyệt/chỉnh sửa. |
-| `outline_approved_at` | `DateTimeField` | `null=True` | Thời điểm người dùng phê duyệt dàn ý. |
-| `pipeline_state` | `JSONField` | `default=dict` | Bản lưu (checkpoint) trạng thái LangGraph để khôi phục hoặc tiếp tục chạy. |
-| `status` | `CharField(20)` | `default="pending"` | Trạng thái hiện tại của job (có index để truy vấn nhanh). |
-| `celery_task_id` | `CharField(255)` | `blank=True` | ID của Celery task đang thực thi job này trong background. |
-| `error_message` | `TextField` | `blank=True` | Thông báo lỗi nếu job thất bại. |
-| `llm_calls_count` | `PositiveIntegerField`| `default=0` | Tổng số lần gọi LLM của toàn bộ job. |
-| `llm_tokens_used` | `PositiveIntegerField`| `default=0` | Tổng số token đã tiêu thụ (nếu có). |
-| `llm_usage_by_provider` | `JSONField` | `default=dict` | Thống kê số lần gọi LLM chi tiết theo từng nhà cung cấp (Gemini, Ollama...). |
-| `created_at` | `DateTimeField` | `default=timezone.now`| Thời điểm tạo job (có index). |
-| `started_at` | `DateTimeField` | `null=True` | Thời điểm bắt đầu chạy job. |
-| `completed_at` | `DateTimeField` | `null=True` | Thời điểm kết thúc job. |
+API lấy artifact mới nhất bằng:
 
----
-
-### 2.2 AgentRun
-
-Model `AgentRun` lưu nhật ký chi tiết mỗi khi một agent cụ thể được thực thi trong một Job.
-
-* **Trạng thái (`Status`):** `pending`, `running`, `completed`, `failed`, `skipped`.
-* **Loại Agent (`AgentType`):**
-  * `coordinator`: Agent điều phối cấu hình.
-  * `coordinator_router`: Agent điều phối và định tuyến các chu kỳ sửa lỗi.
-  * `image_research`: Agent tìm kiếm ảnh từ Wikimedia Commons.
-  * `research`: Agent tìm kiếm và thu thập thông tin từ web.
-  * `outline`: Agent thiết lập dàn ý.
-  * `writer`: Agent lập kế hoạch phân bổ viết bài.
-  * `section_writer`: Agent thực hiện viết bài theo từng phần riêng lẻ (chạy song song).
-  * `join_draft`: Agent ghép các bài viết thô lại thành bản nháp hoàn chỉnh.
-  * `editor`: Agent biên tập lỗi ngữ pháp, văn phong.
-  * `seo`: Agent tối ưu SEO từ khóa và metadata.
-  * `fact_checker`: Agent kiểm chứng sự thật và nguồn.
-  * `qa`: Agent chấm điểm chất lượng cuối cùng.
-
-#### Chi tiết thuộc tính của model `AgentRun`:
-
-| Tên trường | Kiểu dữ liệu | Thuộc tính | Mô tả |
-| :--- | :--- | :--- | :--- |
-| `id` | `UUIDField` | `primary_key=True` | Định danh duy nhất dạng UUID. |
-| `job` | `ForeignKey(Job)` | `on_delete=models.CASCADE` | Liên kết đến Job sở hữu. |
-| `agent_type` | `CharField` | choices `AgentType` | Loại agent đang thực thi bước này. |
-| `status` | `CharField` | choices `Status` | Trạng thái thực thi của agent. |
-| `attempt` | `PositiveSmallIntegerField`| `default=1` | Số lần thử lại (attempt) của agent này trong vòng sửa lỗi. |
-| `error_message` | `TextField` | `blank=True` | Lỗi chi tiết phát sinh khi agent chạy thất bại. |
-| `prompt_snapshot` | `TextField` | `blank=True` | Lưu trữ tóm tắt hoặc nội dung prompt gửi đi để debug. |
-| `response_snapshot` | `TextField` | `blank=True` | Lưu trữ tóm tắt phản hồi của LLM để kiểm tra chéo. |
-| `provider` | `CharField(50)` | `blank=True` | Nhà cung cấp LLM được dùng (ví dụ: `gemini`, `ollama`...). |
-| `llm_calls_count` | `PositiveIntegerField`| `default=0` | Số lần gọi LLM trong lượt chạy này. |
-| `input_tokens` | `PositiveIntegerField`| `default=0` | Số lượng token đầu vào (nếu provider trả về). |
-| `output_tokens` | `PositiveIntegerField`| `default=0` | Số lượng token đầu ra (nếu provider trả về). |
-| `started_at` | `DateTimeField` | `null=True` | Thời điểm bắt đầu chạy agent. |
-| `completed_at` | `DateTimeField` | `null=True` | Thời điểm hoàn thành chạy agent. |
-
----
-
-### 2.3 Artifact
-
-Model `Artifact` lưu trữ kết quả đầu ra (chữ hoặc cấu trúc JSON) được tạo ra từ mỗi agent. Các artifact được phiên bản hóa (`version`) để theo dõi sự thay đổi qua các vòng sửa đổi.
-
-* **Loại Artifact (`ArtifactType`):**
-  * `research_summary`: Tóm tắt kết quả nghiên cứu.
-  * `outline`: Cấu trúc dàn ý bài viết (gồm tiêu đề, briefs, key points).
-  * `draft`: Bản nháp ghép thô từ các section writers.
-  * `edited_draft`: Bản nháp đã được biên tập và sửa chữa bởi Editor Agent.
-  * `final_content`: Bản nội dung hoàn chỉnh cuối cùng (sẵn sàng export).
-  * `seo_metadata`: Thông tin SEO tối ưu (meta title, description, slug, density).
-  * `qa_report`: Báo cáo đánh giá chất lượng và điểm số từ QA Agent.
-  * `fact_check_report`: Kết quả kiểm định các tuyên bố sự thật so với nguồn gốc.
-  * `source_documents`: Danh sách các nguồn tham khảo (titles, URLs) thu được từ web search.
-  * `image_assets`: Danh sách các ảnh bản quyền mở tự động tìm kiếm (Wikimedia Commons).
-
-#### Chi tiết thuộc tính của model `Artifact`:
-
-| Tên trường | Kiểu dữ liệu | Thuộc tính | Mô tả |
-| :--- | :--- | :--- | :--- |
-| `id` | `UUIDField` | `primary_key=True` | Định danh duy nhất dạng UUID. |
-| `job` | `ForeignKey(Job)` | `on_delete=models.CASCADE` | Liên kết đến Job sở hữu. |
-| `agent_run` | `ForeignKey(AgentRun)`| `on_delete=models.SET_NULL` | Liên kết đến lượt chạy agent tạo ra artifact này (nếu có). |
-| `artifact_type` | `CharField(30)` | choices `ArtifactType` | Loại kết quả đầu ra của agent. |
-| `content_text` | `TextField` | `blank=True` | Lưu nội dung văn bản (nháp bài viết, tóm tắt bài viết...). |
-| `content_json` | `JSONField` | `default=dict` | Lưu trữ cấu trúc JSON (dàn ý, siêu dữ liệu SEO, báo cáo QA...). |
-| `word_count` | `PositiveIntegerField`| `default=0` | Số từ đếm được từ `content_text`. |
-| `version` | `PositiveSmallIntegerField`| `default=1` | Số thứ tự phiên bản (tăng dần khi bài viết được viết lại). |
-| `created_at` | `DateTimeField` | `default=timezone.now`| Thời điểm tạo artifact. |
-
----
-
-### 2.4 Revision
-
-Model `Revision` lưu vết các chu kỳ sửa đổi chất lượng (ví dụ: QA chấm điểm dưới mức tối thiểu hoặc Editor yêu cầu viết lại các phần cụ thể).
-
-#### Chi tiết thuộc tính của model `Revision`:
-
-| Tên trường | Kiểu dữ liệu | Thuộc tính | Mô tả |
-| :--- | :--- | :--- | :--- |
-| `id` | `UUIDField` | `primary_key=True` | Định danh duy nhất dạng UUID. |
-| `job` | `ForeignKey(Job)` | `on_delete=models.CASCADE` | Liên kết đến Job bị sửa đổi. |
-| `revision_number` | `PositiveSmallIntegerField`| `default=1` | Số thứ tự vòng sửa đổi (vòng 1, vòng 2...). |
-| `triggered_by` | `CharField(30)` | choices `AgentType` | Agent đã đưa ra quyết định yêu cầu sửa (thường là `qa` hoặc `editor`). |
-| `reason` | `TextField` | | Lý do chi tiết yêu cầu sửa bài viết. |
-| `issues` | `JSONField` | `default=list` | Danh sách cụ thể các vấn đề cần chỉnh sửa (issues). |
-| `resolved` | `BooleanField` | `default=False` | Đánh dấu vòng sửa đổi này đã được giải quyết xong hay chưa. |
-| `created_at` | `DateTimeField` | `default=timezone.now`| Thời điểm phát sinh yêu cầu sửa đổi. |
-
----
-
-## 3. Các truy vấn cơ sở dữ liệu chính (Key Queries)
-
-### Lấy toàn bộ dòng thời gian (Timeline) của một Job cùng các lượt chạy và sửa đổi:
 ```python
-job = Job.objects.prefetch_related(
-    "agent_runs",
-    "artifacts",
-    "revisions"
-).get(id=job_id)
+order_by("-version", "-created_at")
 ```
 
-### Lấy bản nháp hoàn chỉnh cuối cùng đã được phê duyệt:
-```python
-final_artifact = job.artifacts.filter(
-    artifact_type=Artifact.ArtifactType.FINAL_CONTENT
-).order_by("-version").first()
+## Revision
 
-if final_artifact:
-    print(final_artifact.content_text)
+`Revision` ghi lại các vòng sửa do router/QA/fact-checker kích hoạt.
+
+| Field | Ý nghĩa |
+| --- | --- |
+| `revision_number` | Thứ tự vòng sửa. |
+| `triggered_by` | Agent tạo yêu cầu sửa. |
+| `reason` | Lý do sửa. |
+| `issues` | Danh sách issue cụ thể. |
+| `resolved` | Vòng sửa đã xử lý hay chưa. |
+
+## Quan Hệ
+
+```text
+Job 1 -- n AgentRun
+Job 1 -- n Artifact
+Job 1 -- n Revision
+AgentRun 1 -- n Artifact (optional)
 ```
 
-### Thống kê hiệu suất và chi phí của từng nhà cung cấp mô hình (Ollama vs Gemini):
-```python
-from django.db.models import Avg, Sum
-summary = Job.objects.aggregate(
-    avg_duration=Avg("duration_seconds"),
-    avg_calls=Avg("llm_calls_count")
-)
+## Dữ Liệu Local
+
+`.env.example` dùng PostgreSQL local qua Docker:
+
+```env
+DATABASE_URL=postgres://content_user:content_pass@localhost:5433/content_pipeline
 ```
+
+Nếu không set `DATABASE_URL`, Django fallback về SQLite `db.sqlite3`, nhưng cách chạy được khuyến nghị là PostgreSQL vì `docker-compose.dev.yml` đã có sẵn database và Redis.

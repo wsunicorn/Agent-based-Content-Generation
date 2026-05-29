@@ -82,7 +82,7 @@ class ResearchAgent(BaseAgent):
             from tavily import TavilyClient
 
             client = TavilyClient(api_key=api_key)
-            
+
             # Use LLM to generate an optimal search query
             domain_terms = get_domain_search_terms(state.domain)
             system_prompt = (
@@ -96,7 +96,7 @@ class ResearchAgent(BaseAgent):
                 f"Domain-specific search terms context: {domain_terms}\n\n"
                 "Provide the best search query."
             )
-            
+
             try:
                 response = self._call_llm(
                     system_prompt=system_prompt,

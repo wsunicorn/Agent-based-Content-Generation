@@ -213,7 +213,6 @@ class Command(BaseCommand):
             )
             elapsed = time.time() - t0
 
-            valid_fields = {f.name for f in dataclasses.fields(PipelineState)}
             state = PipelineState.from_dict(final)
 
             _save_artifacts(job, state)

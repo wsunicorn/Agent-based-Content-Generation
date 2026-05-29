@@ -80,7 +80,7 @@ class QAReport:
     clarity_score: float = 0.0          # 20 pts
     accuracy_score: float = 0.0         # 20 pts
     engagement_score: float = 0.0       # 15 pts
-    format_adherence_score: float = 0.0 # 15 pts
+    format_adherence_score: float = 0.0  # 15 pts
     seo_score: float = 0.0              # 15 pts
     completeness_score: float = 0.0     # 15 pts
     passed: bool = False

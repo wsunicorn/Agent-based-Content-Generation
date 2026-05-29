@@ -41,17 +41,17 @@ if errorlevel 1 (
 
 echo.
 echo [3/5] Starting Celery Worker 1 (solo pool)...
-start "Celery Worker 1" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && celery -A config worker -l info -P solo -n worker1@%%h"
+start "Celery Worker 1" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && set DJANGO_SETTINGS_MODULE=config.settings.development&& celery -A config worker -l info -P solo -n worker1@%%h"
 
 echo [4/5] Starting Celery Worker 2 (solo pool)...
-start "Celery Worker 2" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && celery -A config worker -l info -P solo -n worker2@%%h"
+start "Celery Worker 2" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && set DJANGO_SETTINGS_MODULE=config.settings.development&& celery -A config worker -l info -P solo -n worker2@%%h"
 
 echo Waiting for Celery workers to initialize...
 timeout /t 4 /nobreak >nul
 
 echo.
 echo [5/5] Starting Daphne ASGI server...
-start "Daphne Server" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && daphne -b 127.0.0.1 -p 8000 config.asgi:application"
+start "Daphne Server" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && set DJANGO_SETTINGS_MODULE=config.settings.development&& daphne -b 127.0.0.1 -p 8000 config.asgi:application"
 
 echo.
 echo ============================================================

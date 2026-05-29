@@ -1172,9 +1172,11 @@ function mdToHtml(md) {
     // italic
     .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
     // images
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) =>
+      '<img src="' + attr(safeUrl(url)) + '" alt="' + attr(alt) + '" loading="lazy">')
     // links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) =>
+      '<a href="' + attr(safeUrl(url)) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
 
   // lists
   const lines = html.split('\n');
@@ -1271,7 +1273,7 @@ function handleWsMessage(data, jobId) {
         chip.className = 'log-line';
         let host = img.title || 'image';
         chip.innerHTML = '<span class="log-time">      </span>'
-          + '<a href="'+esc(img.url)+'" target="_blank" rel="noopener" class="source-chip" style="color: var(--teal); border-color: rgba(64,224,208,.3);">🖼️ '+esc(img.title||host)+'</a>';
+          + '<a href="'+attr(safeUrl(img.url))+'" target="_blank" rel="noopener" class="source-chip" style="color: var(--teal); border-color: rgba(64,224,208,.3);">🖼️ '+esc(img.title||host)+'</a>';
         el.appendChild(chip);
         el.scrollTop = el.scrollHeight;
       });
@@ -1284,7 +1286,7 @@ function handleWsMessage(data, jobId) {
         let host = s.title || 'source';
         try { if (s.url) host = new URL(s.url, window.location.origin).hostname.replace('www.',''); } catch {}
         chip.innerHTML = '<span class="log-time">      </span>'
-          + '<a href="'+esc(s.url)+'" target="_blank" rel="noopener" class="source-chip">🔗 '+esc(s.title||host)+'</a>';
+          + '<a href="'+attr(safeUrl(s.url))+'" target="_blank" rel="noopener" class="source-chip">🔗 '+esc(s.title||host)+'</a>';
         el.appendChild(chip);
         el.scrollTop = el.scrollHeight;
       });
@@ -1447,8 +1449,8 @@ async function loadEvidence(jobId) {
     const sources = (data.sources || []).filter(s => s.source_type !== 'image').slice(0, 8);
     const images = (data.images || []).slice(0, 4);
     const rows = [];
-    sources.forEach(s => rows.push('<div class="evidence-item"><div class="evidence-title">' + esc(s.title || 'Source') + '</div><a class="evidence-url" href="' + esc(s.url || '#') + '" target="_blank">' + esc(s.url || '') + '</a></div>'));
-    images.forEach(img => rows.push('<div class="evidence-item"><div class="evidence-title">' + esc(img.title || img.caption || 'Image') + '</div><a class="evidence-url" href="' + esc(img.source_url || img.url || '#') + '" target="_blank">' + esc(img.provider || 'image source') + '</a></div>'));
+    sources.forEach(s => rows.push('<div class="evidence-item"><div class="evidence-title">' + esc(s.title || 'Source') + '</div><a class="evidence-url" href="' + attr(safeUrl(s.url || '#')) + '" target="_blank" rel="noopener">' + esc(s.url || '') + '</a></div>'));
+    images.forEach(img => rows.push('<div class="evidence-item"><div class="evidence-title">' + esc(img.title || img.caption || 'Image') + '</div><a class="evidence-url" href="' + attr(safeUrl(img.source_url || img.url || '#')) + '" target="_blank" rel="noopener">' + esc(img.provider || 'image source') + '</a></div>'));
     if (rows.length) {
       document.getElementById('evidence-list').innerHTML = rows.join('');
       document.getElementById('evidence-panel').classList.remove('d-none');
@@ -1683,6 +1685,21 @@ function esc(s){
     .replace(/</g,'&lt;')
     .replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;');
+}
+function attr(s) {
+  return esc(s).replace(/'/g,'&#39;');
+}
+function safeUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '#';
+  if (value.startsWith('/') && !value.startsWith('//')) return value;
+  if (value.startsWith('#')) return value;
+  try {
+    const url = new URL(value, window.location.origin);
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.href : '#';
+  } catch {
+    return '#';
+  }
 }
 function csrfHeaders() {
   const token = document.querySelector('[name=csrfmiddlewaretoken]');

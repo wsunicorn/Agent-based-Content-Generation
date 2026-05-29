@@ -2,6 +2,7 @@
 import json
 import logging
 
+from django.conf import settings
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,11 @@ class JobProgressConsumer(AsyncWebsocketConsumer):
     """
 
     async def connect(self):
+        user = self.scope.get("user")
+        if not settings.DEBUG and (not user or not user.is_authenticated):
+            await self.close(code=4401)
+            return
+
         self.job_id = self.scope["url_route"]["kwargs"]["job_id"]
         self.group_name = f"job_{self.job_id}"
 

@@ -146,6 +146,10 @@ def run_pipeline(self, job_id: str):
         logger.error("Job %s not found", job_id)
         return {"error": "Job not found"}
 
+    if job.status == Job.Status.CANCELLED:
+        logger.info("Job %s was cancelled before task start", job_id)
+        return {"status": "cancelled", "job_id": job_id}
+
     # Mark job as running
     resume_from_outline = bool(
         job.pipeline_state
@@ -202,6 +206,9 @@ def run_pipeline(self, job_id: str):
             "recursion_limit": max(25, getattr(settings, "LANGGRAPH_RECURSION_LIMIT", 80)),
         }
         for chunk in graph.stream(initial, stream_config):
+            if _job_cancel_requested(job):
+                return _mark_job_cancelled(job, job_id)
+
             for node_name, node_output in chunk.items():
                 _merge_graph_output(final_state, node_output)
                 _update_job_progress(job, final_state)
@@ -305,8 +312,14 @@ def run_pipeline(self, job_id: str):
                     logger.info("Job %s paused for outline review", job_id)
                     return {"status": "paused", "job_id": job_id}
 
+                if _job_cancel_requested(job):
+                    return _mark_job_cancelled(job, job_id)
+
         # Reconstruct PipelineState from final dict
         state = PipelineState.from_dict(final_state)
+
+        if _job_cancel_requested(job):
+            return _mark_job_cancelled(job, job_id)
 
         # Persist artifacts
         _save_artifacts(job, state)
@@ -337,11 +350,18 @@ def run_pipeline(self, job_id: str):
         from apps.agents.base import GeminiDailyQuotaExceeded
 
         logger.exception("Job %s failed: %s", job_id, exc)
+        try:
+            job.refresh_from_db(fields=["status"])
+        except Job.DoesNotExist:
+            return {"status": "deleted", "job_id": job_id}
+        if job.status == Job.Status.CANCELLED:
+            return _mark_job_cancelled(job, job_id)
+
         job.status = Job.Status.FAILED
 
         if isinstance(exc, GeminiDailyQuotaExceeded):
             user_message = (
-                "⛔ Gemini free-tier daily limit reached (20 req/day). "
+                f"Gemini daily limit reached ({settings.GEMINI_DAILY_LIMIT} req/day). "
                 "Quota resets at midnight Pacific Time (~UTC-8). "
                 "You can retry tomorrow or add billing at https://aistudio.google.com"
             )
@@ -358,6 +378,30 @@ def run_pipeline(self, job_id: str):
 # ---------------------------------------------------------------------------
 # Helper: persist pipeline outputs as Artifact records
 # ---------------------------------------------------------------------------
+
+def _job_cancel_requested(job) -> bool:
+    from apps.jobs.models import Job
+
+    try:
+        job.refresh_from_db(fields=["status"])
+    except Job.DoesNotExist:
+        return True
+    return job.status == Job.Status.CANCELLED
+
+
+def _mark_job_cancelled(job, job_id: str) -> dict:
+    job.status = job.Status.CANCELLED
+    job.completed_at = dj_timezone.now()
+    job.save(update_fields=["status", "completed_at"])
+    push_progress(
+        job_id,
+        "pipeline",
+        "cancelled",
+        {"message": "Job cancelled."},
+    )
+    logger.info("Job %s cancelled", job_id)
+    return {"status": "cancelled", "job_id": job_id}
+
 
 def _next_artifact_version(job, artifact_type):
     from apps.jobs.models import Artifact
@@ -530,6 +574,13 @@ def _save_artifacts(job, state):
         )
 
     if artifacts_to_create:
+        next_versions: dict[str, int] = {}
+        for artifact in artifacts_to_create:
+            artifact_type = artifact.artifact_type
+            if artifact_type not in next_versions:
+                next_versions[artifact_type] = _next_artifact_version(job, artifact_type)
+            artifact.version = next_versions[artifact_type]
+            next_versions[artifact_type] += 1
         Artifact.objects.bulk_create(artifacts_to_create)
 
 
