@@ -14,7 +14,7 @@ Trường quan trọng:
 | `title` | CharField | Tiêu đề hiển thị. |
 | `topic` | TextField | Chủ đề hoặc câu hỏi nghiên cứu. |
 | `content_type` | choices | `blog_post`, `technical_report`, `news_article`, `tutorial`. |
-| `domain` | choices | `tech`, `marketing`, `education`, `finance`, `healthcare`, `legal`. |
+| `domain` | choices | `general`, `food`, `tech`, `marketing`, `education`, `finance`, `healthcare`, `legal`. |
 | `audience` | CharField | Độc giả mục tiêu. |
 | `tone` | choices | Giọng văn mong muốn. |
 | `quality_mode` | choices | `fast`, `standard`, `strict`. |

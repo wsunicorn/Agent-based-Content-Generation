@@ -28,6 +28,8 @@ class Job(models.Model):
         STRICT = "strict", "Strict"
 
     class Domain(models.TextChoices):
+        GENERAL = "general", "General"
+        FOOD = "food", "Food & Lifestyle"
         TECH = "tech", "Tech"
         MARKETING = "marketing", "Marketing"
         EDUCATION = "education", "Education"
@@ -52,7 +54,7 @@ class Job(models.Model):
     domain = models.CharField(
         max_length=30,
         choices=Domain.choices,
-        default=Domain.TECH,
+        default=Domain.GENERAL,
         help_text="Domain guide used by research, writing, editing, and QA",
     )
     audience = models.CharField(

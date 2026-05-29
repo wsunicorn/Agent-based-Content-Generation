@@ -7,7 +7,7 @@ Domain LLM Assistant là một ứng dụng Django dùng nhiều agent AI để 
 | Tài liệu | Mục đích |
 | --- | --- |
 | [deployment.md](./deployment.md) | Cài đặt local trên Windows, cấu hình `.env`, Docker, Ollama, Redis/PostgreSQL, chạy `start.bat`. |
-| [architecture.md](./architecture.md) | Các khối chính của hệ thống: Django, Celery, Redis, Channels, LangGraph, LLM providers. |
+| [architecture.md](./architecture.md) | Sơ đồ tổng quan, cách các thành phần tương tác, và mức độ quan trọng P0/P1/P2. |
 | [workflow.md](./workflow.md) | Luồng chạy từng bước từ tạo job đến xuất nội dung. |
 | [agents/overview.md](./agents/overview.md) | Vai trò từng agent và file code tương ứng. |
 | [api.md](./api.md) | REST API và WebSocket events. |
@@ -38,6 +38,7 @@ Các điểm quan trọng:
 - API nằm trong `apps/jobs/views.py`; WebSocket consumer nằm trong `apps/dashboard/consumers.py`.
 - Pipeline LangGraph nằm trong `apps/pipeline/graph.py`; state nằm trong `apps/pipeline/state.py`.
 - Celery task chính là `run_pipeline` trong `apps/jobs/tasks.py`.
+- Thành phần quan trọng nhất là PostgreSQL, Celery worker, LangGraph/PipelineState và LLM providers.
 - Local development dùng `config.settings.development`; production dùng `config.settings.production`.
 - `.env` bị ignore khỏi Git. Không commit API key, database password hoặc Django `SECRET_KEY`.
 

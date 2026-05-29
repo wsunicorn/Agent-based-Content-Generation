@@ -6,7 +6,7 @@ from apps.agents.content_guides import (
     get_outline_blueprint,
 )
 from apps.agents.writer import WriterAgent
-from apps.pipeline.state import OutlineSection, PipelineState
+from apps.pipeline.state import OutlineSection, PipelineState, SourceDocument
 
 
 def test_content_type_guides_are_distinct_and_complete():
@@ -57,3 +57,43 @@ def test_writer_planner_uses_template_specific_intro_and_conclusion():
     assert updated.writer_tasks[0].template_role == "Introduction"
     assert updated.writer_tasks[1].template_role == "Key findings"
     assert updated.writer_tasks[-1].heading == get_conclusion_heading("technical_report")
+
+
+def test_writer_planner_does_not_pass_image_sources_as_text_evidence():
+    state = PipelineState(
+        topic="Vietnamese dishes",
+        content_type="blog_post",
+        target_length=700,
+        sections=[
+            OutlineSection(
+                heading="Dishes to try",
+                level=1,
+                brief="Cover concrete dishes.",
+                key_points=[],
+            )
+        ],
+        sources=[
+            SourceDocument(
+                url="https://example.com/image.jpg",
+                title="Image",
+                content="Image asset",
+                source_type="image",
+            ),
+            SourceDocument(
+                url="https://example.com/food",
+                title="Food guide",
+                content="Pho, banh mi, and bun cha are popular Vietnamese dishes.",
+                source_type="web",
+            ),
+        ],
+    )
+
+    updated = WriterAgent().run(state)
+
+    assert updated.writer_tasks[1].relevant_sources == [
+        {
+            "title": "Food guide",
+            "url": "https://example.com/food",
+            "content": "Pho, banh mi, and bun cha are popular Vietnamese dishes.",
+        }
+    ]

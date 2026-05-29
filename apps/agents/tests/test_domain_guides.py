@@ -11,6 +11,8 @@ from apps.pipeline.state import PipelineState
 
 def test_domain_guides_cover_initial_domains_and_safety_rules():
     assert set(DOMAIN_GUIDES) == {
+        "general",
+        "food",
         "tech",
         "marketing",
         "education",
@@ -47,8 +49,10 @@ def test_domain_guide_text_includes_user_positioning():
 
 def test_domain_search_terms_and_normalisation_are_stable():
     assert normalise_domain("Finance") == "finance"
-    assert normalise_domain("unknown") == "tech"
+    assert normalise_domain("Food Lifestyle") == "food"
+    assert normalise_domain("unknown") == "general"
     assert "volatility" in get_domain_search_terms("finance")
+    assert "flavor" in get_domain_search_terms("food")
 
 
 def test_coordinator_normalises_domain_metadata_before_agents_run():

@@ -98,11 +98,16 @@ class WriterAgent(BaseAgent):
 
     @staticmethod
     def _source_refs(state: PipelineState, limit: int = 3) -> list[dict[str, str]]:
+        text_sources = [
+            source
+            for source in state.sources
+            if getattr(source, "source_type", "web") != "image"
+        ]
         return [
             {
                 "title": source.title,
                 "url": source.url,
                 "content": source.content[:500],
             }
-            for source in state.sources[:limit]
+            for source in text_sources[:limit]
         ]

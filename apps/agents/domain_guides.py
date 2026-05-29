@@ -15,6 +15,64 @@ class DomainGuide:
 
 
 DOMAIN_GUIDES: dict[str, DomainGuide] = {
+    "general": DomainGuide(
+        label="General",
+        source_preferences=(
+            "Reputable explanatory sources, official pages, encyclopedic references, and topic-specific publications.",
+            "Prefer sources that directly match the user's topic before adding broader domain context.",
+        ),
+        style_guide=(
+            "Answer the user's topic directly before adding adjacent context.",
+            "Use clear examples and avoid unnecessary specialist jargon.",
+            "Keep recommendations practical and grounded in the stated audience and tone.",
+        ),
+        terminology=(
+            "overview",
+            "examples",
+            "context",
+            "benefits",
+            "risks",
+            "takeaways",
+            "next steps",
+        ),
+        cautions=(
+            "Do not let a broad category override the user's specific topic.",
+            "Avoid unsupported rankings, superlatives, or claims of universal consensus.",
+        ),
+        forbidden_claims=(
+            "Do not invent statistics, quotes, awards, or source-backed claims.",
+            "Do not present subjective preferences as objective facts without qualification.",
+        ),
+    ),
+    "food": DomainGuide(
+        label="Food & Lifestyle",
+        source_preferences=(
+            "Culinary references, reputable food/travel publications, cultural explainers, official tourism pages, and local food guides.",
+            "Prefer sources about concrete dishes, ingredients, regions, preparation, serving context, and food culture.",
+        ),
+        style_guide=(
+            "Write descriptively with concrete dish names, ingredients, flavors, textures, and regional context.",
+            "Prioritise the reader's food discovery intent before business, marketing, or market-size analysis.",
+            "Use practical details such as where the dish is common, how it is served, and why people like it.",
+        ),
+        terminology=(
+            "dish",
+            "ingredient",
+            "flavor",
+            "texture",
+            "regional specialty",
+            "street food",
+            "serving style",
+        ),
+        cautions=(
+            "Taste and ranking are subjective and vary by region and personal preference.",
+            "Origins, recipes, and naming can vary across local communities.",
+        ),
+        forbidden_claims=(
+            "Do not claim a dish is the best, healthiest, original, or authentic version without strong evidence and qualification.",
+            "Do not make medical or nutrition claims unless they are clearly sourced and conservative.",
+        ),
+    ),
     "tech": DomainGuide(
         label="Tech",
         source_preferences=(
@@ -191,11 +249,23 @@ DOMAIN_GUIDES: dict[str, DomainGuide] = {
     ),
 }
 
-DEFAULT_DOMAIN = "tech"
+DOMAIN_ALIASES = {
+    "food_lifestyle": "food",
+    "food_&_lifestyle": "food",
+    "culinary": "food",
+    "cuisine": "food",
+    "cooking": "food",
+    "ẩm_thực": "food",
+    "am_thuc": "food",
+    "general_topic": "general",
+}
+
+DEFAULT_DOMAIN = "general"
 
 
 def normalise_domain(value: str | None) -> str:
     domain = (value or DEFAULT_DOMAIN).strip().lower().replace(" ", "_")
+    domain = DOMAIN_ALIASES.get(domain, domain)
     return domain if domain in DOMAIN_GUIDES else DEFAULT_DOMAIN
 
 

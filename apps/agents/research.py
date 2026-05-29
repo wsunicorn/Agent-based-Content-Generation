@@ -4,10 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import BaseModel, Field
 from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core.cache import cache
@@ -21,10 +21,6 @@ logger = logging.getLogger(__name__)
 
 SOURCE_CONTENT_LIMIT = 1500
 SUMMARY_LIMIT = 3000
-
-
-class WebSearchQuery(BaseModel):
-    query: str = Field(description="A highly effective web search query optimized for an academic or professional search engine. Should be precise and focused.")
 
 
 class ResearchAgent(BaseAgent):
@@ -72,7 +68,8 @@ class ResearchAgent(BaseAgent):
             logger.warning("[ResearchAgent] TAVILY_API_KEY not set - skipping web search.")
             return []
 
-        cache_key = self._cache_key("search", state.topic, state.keywords, state.domain)
+        query = self._build_search_query(state)
+        cache_key = self._cache_key("search:v2", query, state.language, state.domain)
         cached = cache.get(cache_key)
         if cached is not None:
             logger.info("[ResearchAgent] Tavily cache hit.")
@@ -82,35 +79,6 @@ class ResearchAgent(BaseAgent):
             from tavily import TavilyClient
 
             client = TavilyClient(api_key=api_key)
-
-            # Use LLM to generate an optimal search query
-            domain_terms = get_domain_search_terms(state.domain)
-            system_prompt = (
-                "You are an expert web researcher. Analyze the topic, keywords, and target domain "
-                "to produce exactly ONE highly effective, precise search query string (max 8 words) for a web search engine."
-            )
-            user_prompt = (
-                f"Topic: {state.topic}\n"
-                f"Keywords: {', '.join(state.keywords[:3])}\n"
-                f"Target Domain: {state.domain}\n"
-                f"Domain-specific search terms context: {domain_terms}\n\n"
-                "Provide the best search query."
-            )
-
-            try:
-                response = self._call_llm(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    output_schema=WebSearchQuery
-                )
-                query = response.query
-            except Exception as exc:
-                logger.warning("[ResearchAgent] Failed to generate smart web query, falling back to naive: %s", exc)
-                query = state.topic
-                if state.keywords:
-                    query = f"{state.topic} ({', '.join(state.keywords[:3])})"
-                if domain_terms:
-                    query = f"{query} {domain_terms}"
 
             response = client.search(
                 query=query,
@@ -128,6 +96,23 @@ class ResearchAgent(BaseAgent):
         except Exception as exc:
             logger.error("[ResearchAgent] Tavily search failed: %s", exc)
             return []
+
+    @staticmethod
+    def _build_search_query(state: PipelineState) -> str:
+        """Build a deterministic query that keeps the user topic dominant."""
+        topic = " ".join(str(state.topic or "").split()).strip()
+        keyword_text = " ".join(
+            keyword
+            for keyword in (str(item).strip() for item in state.keywords[:3])
+            if keyword and keyword.lower() not in topic.lower()
+        )
+        query = f"{topic} {keyword_text}".strip() or keyword_text
+
+        domain = str(state.domain or "").lower()
+        if domain not in {"general", "food"} and len(re.findall(r"\w+", query)) <= 4:
+            query = f"{query} {get_domain_search_terms(domain)}".strip()
+
+        return query[:160] or "general information"
 
     def _scrape_and_trim(self, raw_results: list[dict]) -> list[SourceDocument]:
         sources: list[SourceDocument] = []
@@ -208,14 +193,16 @@ class ResearchAgent(BaseAgent):
         system_prompt = (
             "You are a research assistant. Summarise the provided sources into a "
             "concise, factual overview. Focus on key facts, statistics, and "
-            "viewpoints relevant to the topic and domain. Maximum 300 words."
+            "viewpoints relevant to the user's exact topic. Maximum 300 words. "
+            "Do not let broad domain context replace the topic; if a source is only "
+            "adjacent, describe that limitation briefly."
         )
         user_prompt = (
             f"Topic: {state.topic}\n\n"
             f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Sources:\n{source_text}\n\n"
-            "Write a 200-300 word research summary. Prioritise domain-relevant evidence, "
-            "source caveats, terminology, and safety/compliance cautions."
+            "Write a 200-300 word research summary. Prioritise direct topic evidence, "
+            "then add domain caveats, terminology, and safety/compliance cautions only when useful."
         )
 
         response = self._call_llm(system_prompt, user_prompt)

@@ -41,19 +41,21 @@ Body JSON:
   "title": "AI in education",
   "topic": "How AI changes classroom assessment",
   "content_type": "blog_post",
-  "domain": "education",
+  "domain": "food",
   "audience": "teachers",
   "tone": "practical",
   "quality_mode": "standard",
   "target_length": 1200,
-  "keywords": ["classroom", "assessment", "AI"],
-  "language": "English",
-  "additional_instructions": "Use concrete examples.",
+  "keywords": ["pho", "banh mi", "bun cha"],
+  "language": "Vietnamese",
+  "additional_instructions": "Nhớ kèm hình ảnh và mô tả hương vị từng món.",
   "outline_review_required": true
 }
 ```
 
 `keywords` cũng có thể gửi dạng chuỗi phân tách bằng dấu phẩy nếu request đến từ form.
+
+`domain` hiện hỗ trợ: `general`, `food`, `tech`, `marketing`, `education`, `finance`, `healthcare`, `legal`. Dùng `general` khi topic phổ thông và `food` khi viết về món ăn/ẩm thực/lifestyle; tránh chọn `marketing` nếu người dùng không yêu cầu chiến lược thương hiệu, funnel, CAC hoặc LTV.
 
 Response `201` là `JobDetailSerializer`, gồm `id`, `status`, `celery_task_id`, artifacts rỗng ban đầu và metadata.
 

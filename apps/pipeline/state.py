@@ -83,6 +83,7 @@ class QAReport:
     format_adherence_score: float = 0.0  # 15 pts
     seo_score: float = 0.0              # 15 pts
     completeness_score: float = 0.0     # 15 pts
+    topic_alignment_score: float = 100.0
     passed: bool = False
     feedback: list[str] = field(default_factory=list)
     decision: str = "review"            # approve | revise | fail_with_warning
@@ -103,7 +104,7 @@ class PipelineState:
     job_id: str = ""
     topic: str = ""
     content_type: str = "blog_post"
-    domain: str = "tech"
+    domain: str = "general"
     audience: str = ""
     tone: str = ""
     quality_mode: str = "standard"    # fast | standard | strict

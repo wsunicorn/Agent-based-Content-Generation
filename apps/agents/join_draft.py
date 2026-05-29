@@ -70,7 +70,7 @@ class JoinDraftAgent(BaseAgent):
                 parts.append(f"## {intro_heading}\n\n{state.introduction}")
             else:
                 parts.append(state.introduction)
-            image = self._image_block(state, 0)
+            image = self._image_block(state, 0, parts)
             if image:
                 parts.append(image)
 
@@ -78,7 +78,7 @@ class JoinDraftAgent(BaseAgent):
             body = state.body_sections.get(section.heading, "")
             if body:
                 parts.append(f"\n## {section.heading}\n\n{body}")
-                image = self._image_block(state, idx)
+                image = self._image_block(state, idx, parts)
                 if image:
                     parts.append(image)
 
@@ -88,10 +88,13 @@ class JoinDraftAgent(BaseAgent):
         return "\n\n".join(part.strip() for part in parts if part.strip())
 
     @staticmethod
-    def _image_block(state: PipelineState, index: int) -> str:
+    def _image_block(state: PipelineState, index: int, existing_parts: list[str]) -> str:
         if index >= len(state.image_assets):
             return ""
-        return markdown_for_image(state.image_assets[index])
+        asset = state.image_assets[index]
+        if asset.url and any(asset.url in part for part in existing_parts):
+            return ""
+        return markdown_for_image(asset)
 
     @staticmethod
     def _apply_writer_usage(state: PipelineState) -> None:

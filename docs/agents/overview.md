@@ -7,7 +7,7 @@ Agent code nằm trong `apps/agents/`. Mỗi agent nhận `PipelineState`, cập
 | Agent | File | Gọi LLM | Vai trò |
 | --- | --- | --- | --- |
 | Coordinator | [coordinator.py](../../apps/agents/coordinator.py) | Có | Chuẩn hóa metadata và router quyết định bước kế tiếp. |
-| ImageResearch | [image_research.py](../../apps/agents/image_research.py) | Không bắt buộc | Tìm ảnh Wikimedia/Tavily, tạo `image_assets`. |
+| ImageResearch | [image_research.py](../../apps/agents/image_research.py) | Không bắt buộc | Tìm ảnh Wikimedia/Tavily, lọc URL ảnh dễ hotlink hỏng, tạo `image_assets`. |
 | Research | [research.py](../../apps/agents/research.py) | Có | Tìm nguồn, scrape và tóm tắt research. |
 | Outline | [outline.py](../../apps/agents/outline.py) | Có | Sinh outline structured theo content type/domain. |
 | Writer | [writer.py](../../apps/agents/writer.py) | Không | Chia outline thành các `SectionWriteTask`. |
@@ -39,10 +39,16 @@ Structured output dùng Pydantic schema. Local providers nhận thêm JSON schem
 
 ## Domain Và Content Guides
 
-- [domain_guides.py](../../apps/agents/domain_guides.py): quy tắc theo lĩnh vực như healthcare, finance, legal.
+- [domain_guides.py](../../apps/agents/domain_guides.py): quy tắc theo lĩnh vực như general, food, tech, marketing, healthcare, finance, legal.
 - [content_guides.py](../../apps/agents/content_guides.py): cấu trúc khác nhau cho blog post, technical report, news article, tutorial.
 
-Các guide này giúp prompt không chung chung và giúp QA/Editor biết tiêu chí của từng loại nội dung.
+Các guide này giúp prompt không chung chung và giúp QA/Editor biết tiêu chí của từng loại nội dung. `general` là mặc định an toàn cho topic phổ thông; `food` dành cho ẩm thực/lifestyle để tránh kéo bài sang ngôn ngữ marketing như CAC, LTV, funnel khi người dùng chỉ muốn khám phá món ăn.
+
+Research luôn giữ topic của người dùng làm trung tâm khi tạo query search. Domain guide chỉ bổ sung tiêu chí viết và kiểm chứng, không được thay thế chủ đề chính.
+
+QA có topic-alignment gate: nếu bài không trả lời đúng topic, ví dụ topic ẩm thực nhưng nội dung trôi sang chiến lược marketing, QA sẽ yêu cầu `redo_outline` thay vì approve.
+
+ImageResearch ưu tiên URL ảnh direct và có thể fetch được. Các host social/CDN tạm như Facebook lookaside/fbcdn bị loại vì thường không hiển thị ổn định trong browser hoặc export.
 
 ## AgentRun Logging
 

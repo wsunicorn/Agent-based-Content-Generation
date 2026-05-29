@@ -50,7 +50,11 @@ Agent tạo danh sách query ảnh từ topic, keyword và domain. Provider mặ
 
 File: [apps/agents/research.py](../apps/agents/research.py)
 
-Research dùng Tavily nếu `ENABLE_WEB_SEARCH=True` và có `TAVILY_API_KEY`. Agent lấy các nguồn phù hợp, scrape nội dung cần thiết, rồi tạo `research_summary` để outline/writer/fact-checker dùng.
+Research dùng Tavily nếu `ENABLE_WEB_SEARCH=True` và có `TAVILY_API_KEY`. Query search được tạo deterministic từ topic và keyword để topic của user luôn đứng trước domain context. Agent lấy các nguồn phù hợp, scrape nội dung cần thiết, rồi tạo `research_summary` để outline/writer/fact-checker dùng.
+
+Nếu `ImageResearch` đã thêm source ảnh vào state, `Writer` sẽ không dùng các source này làm evidence chữ. Ảnh chỉ được `JoinDraft` chèn vào bài bằng markdown ảnh, giúp tránh lỗi writer tự nhắc ảnh rồi hệ thống lại chèn ảnh lần hai.
+
+ImageResearch bỏ qua URL ảnh không đáng tin cậy trước khi lưu artifact: URL phải là HTTP(S), không thuộc host social/CDN dễ chặn hotlink như Facebook/Facebook CDN, và server phải trả về content-type `image/*` hoặc direct image extension hợp lệ.
 
 ### 3.4 Outline
 
@@ -125,6 +129,8 @@ Router quyết định bước tiếp theo dựa trên state. Các quality agent
 - `qa_report`
 
 Nếu QA hoặc fact-check yêu cầu sửa, router có thể đưa graph quay lại writer/editor/fact_checker/seo/qa tùy `target_agent`. Số vòng sửa bị giới hạn bởi `quality_mode`.
+
+QA không chỉ chấm readability/SEO. Nó còn kiểm tra topic alignment. Với topic dạng khám phá ẩm thực, bài phải có đủ món ăn cụ thể, nguyên liệu/hương vị/bối cảnh vùng miền; nếu bài trôi sang business/marketing strategy thì QA yêu cầu tạo lại outline.
 
 ## 4. Regenerate Một Section
 

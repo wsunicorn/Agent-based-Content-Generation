@@ -9,6 +9,8 @@ Token optimisation:
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 
 from django.conf import settings
 from pydantic import BaseModel, Field
@@ -55,6 +57,9 @@ class QAAgent(BaseAgent):
         # Pure-Python scores (zero LLM cost)
         completeness = self._completeness_score(state)        # max 15
         seo_pts = self._seo_score_pts(state)                  # max 15
+        topic_alignment_score, alignment_issues = self._topic_alignment(state, text)
+        fact_quality_issues = self._fact_quality_issues(state)
+        blocking_issues = alignment_issues + fact_quality_issues
 
         if state.quality_mode == "fast" and not getattr(settings, "FAST_MODE_LLM_QA", False):
             llm_scores = self._fast_llm_scores(state, text)
@@ -63,11 +68,15 @@ class QAAgent(BaseAgent):
             llm_scores = self._llm_score(state, text)
             self._track_usage(state, calls=1)
 
+        format_adherence_score = llm_scores.format_adherence_score
+        if alignment_issues:
+            format_adherence_score = min(format_adherence_score, 7.0)
+
         total = (
             llm_scores.clarity_score
             + llm_scores.accuracy_score
             + llm_scores.engagement_score
-            + llm_scores.format_adherence_score
+            + format_adherence_score
             + seo_pts
             + completeness
         )
@@ -77,10 +86,11 @@ class QAAgent(BaseAgent):
             clarity_score=llm_scores.clarity_score,
             accuracy_score=llm_scores.accuracy_score,
             engagement_score=llm_scores.engagement_score,
-            format_adherence_score=llm_scores.format_adherence_score,
+            format_adherence_score=format_adherence_score,
             seo_score=seo_pts,
             completeness_score=completeness,
-            passed=total >= PASS_THRESHOLD,
+            topic_alignment_score=topic_alignment_score,
+            passed=total >= PASS_THRESHOLD and not blocking_issues,
             feedback=llm_scores.feedback,
             decision=llm_scores.decision,
             next_action=llm_scores.next_action,
@@ -89,6 +99,18 @@ class QAAgent(BaseAgent):
             issues=llm_scores.issues or llm_scores.feedback,
             revision_instructions=llm_scores.revision_instructions,
         )
+        if blocking_issues:
+            report.feedback = blocking_issues + report.feedback
+            report.issues = blocking_issues + report.issues
+        if alignment_issues:
+            report.decision = "revise"
+            report.next_action = "redo_outline"
+            report.target_agent = "outline"
+            report.target_section_ids = []
+            report.revision_instructions = (
+                "Rebuild the outline so every section directly answers the user's topic. "
+                "Remove adjacent business/domain framing unless the topic explicitly asks for it."
+            )
         self._normalise_routing(state, report)
         state.qa_report = report
 
@@ -146,6 +168,144 @@ class QAAgent(BaseAgent):
         if meta.focus_keyword:
             pts += 3
         return pts
+
+    @staticmethod
+    def _fact_quality_issues(state: PipelineState) -> list[str]:
+        if state.quality_mode == "fast":
+            return []
+        if len(state.unverified_claims or []) >= 5:
+            return ["Too many factual claims remain unverified for automatic approval."]
+        return []
+
+    # ------------------------------------------------------------------ #
+    # Topic alignment checks                                              #
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def _topic_alignment(cls, state: PipelineState, text: str) -> tuple[float, list[str]]:
+        normalised_text = cls._normalise_text(text)
+        topic_tokens = cls._topic_tokens(state)
+        issues: list[str] = []
+
+        if not topic_tokens:
+            coverage_score = 100.0
+        else:
+            covered = sum(1 for token in topic_tokens if token in normalised_text)
+            coverage_score = round((covered / len(topic_tokens)) * 100, 1)
+            if coverage_score < 45:
+                issues.append(
+                    "The article does not cover enough of the requested topic keywords."
+                )
+
+        if cls._looks_like_food_discovery_topic(state):
+            dish_count = cls._concrete_food_dish_count(normalised_text)
+            marketing_hits = len(re.findall(r"\b(CAC|LTV|ROI)\b", str(text or ""))) + sum(
+                normalised_text.count(term)
+                for term in (
+                    "funnel",
+                    "conversion",
+                    "segmentation",
+                    "positioning",
+                    "khach hang",
+                    "thuong hieu",
+                    "chien dich",
+                )
+            )
+            if dish_count < 5:
+                issues.append(
+                    "Food-discovery topic is under-covered: include more concrete dishes, ingredients, flavors, and regional context."
+                )
+            if marketing_hits >= 8 and dish_count < 6:
+                issues.append(
+                    "The article drifts into marketing or business strategy instead of answering the food-discovery topic."
+                )
+
+        return coverage_score, issues
+
+    @classmethod
+    def _topic_tokens(cls, state: PipelineState) -> list[str]:
+        raw = " ".join([state.topic or "", *[str(item) for item in state.keywords]])
+        tokens = re.findall(r"[a-z0-9]+", cls._normalise_text(raw))
+        stopwords = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "into",
+            "about",
+            "this",
+            "that",
+            "cac",
+            "nhung",
+            "mot",
+            "nhieu",
+            "la",
+            "ve",
+            "cho",
+            "cua",
+            "voi",
+            "trong",
+            "nhu",
+            "nguoi",
+            "viet",
+            "nam",
+        }
+        unique: list[str] = []
+        for token in tokens:
+            if len(token) < 3 or token in stopwords:
+                continue
+            if token not in unique:
+                unique.append(token)
+        return unique[:12]
+
+    @classmethod
+    def _looks_like_food_discovery_topic(cls, state: PipelineState) -> bool:
+        topic = cls._normalise_text(" ".join([state.topic or "", *[str(item) for item in state.keywords]]))
+        phrases = (
+            "cac mon an",
+            "mon an",
+            "mon ngon",
+            "am thuc",
+            "street food",
+            "food to try",
+            "foods to try",
+            "best dishes",
+            "delicious food",
+            "local dishes",
+            "cuisine",
+        )
+        return any(phrase in topic for phrase in phrases)
+
+    @staticmethod
+    def _concrete_food_dish_count(normalised_text: str) -> int:
+        dish_phrases = {
+            "pho",
+            "banh mi",
+            "bun cha",
+            "goi cuon",
+            "com tam",
+            "bun bo",
+            "cao lau",
+            "mi quang",
+            "banh xeo",
+            "nem ran",
+            "cha gio",
+            "bun rieu",
+            "hu tieu",
+            "banh cuon",
+            "xoi",
+            "bo kho",
+            "bun dau",
+            "che",
+        }
+        return sum(1 for dish in dish_phrases if dish in normalised_text)
+
+    @staticmethod
+    def _normalise_text(text: str) -> str:
+        text = unicodedata.normalize("NFD", str(text or "").lower())
+        text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+        return re.sub(r"\s+", " ", text)
 
     # ------------------------------------------------------------------ #
     # LLM quality scoring (1 call)
@@ -276,6 +436,16 @@ class QAAgent(BaseAgent):
             report.issues = report.issues or []
             return
 
+        if report.next_action == "redo_outline" and report.target_agent == "outline":
+            report.decision = "revise"
+            report.target_section_ids = []
+            report.issues = report.issues or report.feedback or ["Outline no longer matches the requested topic."]
+            report.revision_instructions = (
+                report.revision_instructions
+                or "Rebuild the outline so it directly answers the requested topic."
+            )
+            return
+
         weak_sections = self._weak_section_ids(state)
         if weak_sections:
             report.next_action = "rewrite_section"
@@ -294,6 +464,10 @@ class QAAgent(BaseAgent):
             report.target_agent = "writer"
             report.target_section_ids = []
             report.decision = "revise"
+        elif report.accuracy_score < 12 or len(state.unverified_claims) >= 5:
+            report.next_action = "redo_fact_check"
+            report.target_agent = "fact_checker"
+            report.decision = "revise"
         elif report.format_adherence_score < 8:
             report.next_action = "redo_outline"
             report.target_agent = "outline"
@@ -305,10 +479,6 @@ class QAAgent(BaseAgent):
         elif report.seo_score < 10:
             report.next_action = "redo_seo"
             report.target_agent = "seo"
-            report.decision = "revise"
-        elif report.accuracy_score < 12 or len(state.unverified_claims) >= 5:
-            report.next_action = "redo_fact_check"
-            report.target_agent = "fact_checker"
             report.decision = "revise"
         elif report.clarity_score < 12 or report.engagement_score < 9:
             report.next_action = "revise_editor"

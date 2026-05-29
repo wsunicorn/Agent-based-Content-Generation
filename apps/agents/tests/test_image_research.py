@@ -63,3 +63,26 @@ def test_image_research_queries_try_topic_and_keyword_before_domain_terms():
     assert candidates[0] == "AI in education classroom"
     assert "AI in education" in candidates
     assert candidates[-1] != candidates[0]
+
+
+def test_image_research_rejects_unreliable_social_hotlink_urls():
+    agent = ImageResearchAgent()
+
+    assert not agent._is_reliable_image_url(
+        "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=123"
+    )
+    assert not agent._is_reliable_image_url("data:image/png;base64,abc")
+    assert not agent._is_reliable_image_url("https://example.com/report.pdf")
+    assert agent._is_reliable_image_url("https://images.example.com/food-photo.webp")
+
+
+def test_image_research_extracts_tavily_image_dict_fields():
+    item = {
+        "image_url": "https://images.example.com/pho.jpg",
+        "source_url": "https://example.com/pho",
+        "title": "Pho bowl",
+    }
+
+    assert ImageResearchAgent._extract_image_url(item) == "https://images.example.com/pho.jpg"
+    assert ImageResearchAgent._image_source_url(item) == "https://example.com/pho"
+    assert ImageResearchAgent._image_title(item, 1) == "Pho bowl"

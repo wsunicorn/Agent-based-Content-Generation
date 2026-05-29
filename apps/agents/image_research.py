@@ -1,14 +1,14 @@
 """Image Research Agent.
 
-Automatically finds reusable images for the article from Wikimedia Commons and
-stores them as visual assets. No user upload is required.
+Automatically finds reusable images for the article and stores them as visual
+assets. Wikimedia Commons is preferred; Tavily can be used as a fallback.
 """
 from __future__ import annotations
 
 import html
 import logging
 import re
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from django.conf import settings
 import httpx
@@ -21,6 +21,18 @@ from .domain_guides import get_domain_search_terms
 logger = logging.getLogger(__name__)
 
 COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+ALLOWED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg")
+REJECTED_IMAGE_EXTENSIONS = (".pdf", ".html", ".htm", ".php", ".aspx")
+UNRELIABLE_IMAGE_HOST_PARTS = (
+    "facebook.com",
+    "fbcdn.net",
+    "fbsbx.com",
+    "instagram.com",
+    "cdninstagram.com",
+    "pinterest.",
+    "pinimg.com",
+    "tiktokcdn.com",
+)
 
 
 class ImageResearchAgent(BaseAgent):
@@ -51,9 +63,11 @@ class ImageResearchAgent(BaseAgent):
             if assets:
                 break
 
-        # Automatically fall back to Tavily Image Search if Wikimedia returned no results and Tavily API key is available
         if not assets and provider != "tavily" and getattr(settings, "TAVILY_API_KEY", ""):
-            logger.info("[ImageResearchAgent] Wikimedia Commons returned no results. Falling back to Tavily Image Search.")
+            logger.info(
+                "[ImageResearchAgent] Wikimedia Commons returned no results. "
+                "Falling back to Tavily Image Search."
+            )
             for candidate in self._query_candidates(state):
                 query = candidate
                 assets = self._search_tavily(candidate, state)
@@ -132,38 +146,134 @@ class ImageResearchAgent(BaseAgent):
 
         try:
             from tavily import TavilyClient
+
             client = TavilyClient(api_key=api_key)
             response = client.search(
                 query=query,
                 include_images=True,
-                max_results=max(3, self._max_images(state) * 2),
+                max_results=max(3, self._max_images(state) * 3),
             )
-            image_urls = response.get("images", [])
+            image_items = response.get("images", [])
             assets: list[ImageAsset] = []
-            for i, url in enumerate(image_urls):
-                if not url:
+
+            for raw_item in image_items:
+                url = self._extract_image_url(raw_item)
+                if not url or not self._is_reliable_image_url(url):
                     continue
-                caption = self._caption_for_asset(f"Ảnh {i + 1}", state)
-                alt_text = f"Ảnh minh họa liên quan đến {state.topic}"
+                if not self._validate_image_url(url):
+                    logger.debug("[ImageResearchAgent] Skipping non-displayable image URL: %s", url)
+                    continue
+
+                index = len(assets) + 1
+                title = self._image_title(raw_item, index)
+                source_url = self._image_source_url(raw_item) or url
+                caption = self._caption_for_asset(title, state)
                 assets.append(
                     ImageAsset(
-                        title=f"Ảnh {i + 1}",
+                        title=title,
                         url=url,
                         thumbnail_url=url,
-                        source_url=url,
-                        alt_text=alt_text[:180],
+                        source_url=source_url,
+                        alt_text=f"Image related to {state.topic}"[:180],
                         caption=caption[:240],
                         attribution="Web Search",
-                        license="Creative Commons / Fair Use via Web Search",
+                        license="Reusable web image; verify rights before publication",
                         provider="tavily",
                         width=800,
                         height=600,
                     )
                 )
+                if len(assets) >= self._max_images(state):
+                    break
             return assets
         except Exception as exc:
             logger.warning("[ImageResearchAgent] Tavily image search failed: %s", exc)
             return []
+
+    @staticmethod
+    def _extract_image_url(raw_item) -> str:
+        if isinstance(raw_item, str):
+            return raw_item.strip()
+        if isinstance(raw_item, dict):
+            for key in ("url", "image_url", "src", "thumbnail_url"):
+                value = str(raw_item.get(key) or "").strip()
+                if value:
+                    return value
+        return ""
+
+    @staticmethod
+    def _image_title(raw_item, index: int) -> str:
+        if isinstance(raw_item, dict):
+            for key in ("title", "alt", "description"):
+                value = str(raw_item.get(key) or "").strip()
+                if value:
+                    return value[:180]
+        return f"Image {index}"
+
+    @staticmethod
+    def _image_source_url(raw_item) -> str:
+        if not isinstance(raw_item, dict):
+            return ""
+        for key in ("source_url", "page_url", "origin_url"):
+            value = str(raw_item.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _is_reliable_image_url(url: str) -> bool:
+        url = str(url or "").strip()
+        if not url or any(char.isspace() for char in url):
+            return False
+
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return False
+
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return False
+        if any(part in host for part in UNRELIABLE_IMAGE_HOST_PARTS):
+            return False
+
+        path = parsed.path.lower()
+        filename = path.rsplit("/", 1)[-1]
+        if path.endswith(REJECTED_IMAGE_EXTENSIONS):
+            return False
+        if "." in filename and not path.endswith(ALLOWED_IMAGE_EXTENSIONS):
+            return False
+        return True
+
+    def _validate_image_url(self, url: str) -> bool:
+        """Verify that an image URL can be fetched directly by a browser."""
+        headers = {
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "User-Agent": getattr(
+                settings,
+                "IMAGE_SEARCH_USER_AGENT",
+                "DomainLLMAssistant/1.0 (local development)",
+            ),
+        }
+        try:
+            with httpx.Client(timeout=6, follow_redirects=True, headers=headers) as client:
+                response = client.head(url)
+                if response.status_code in {403, 405} or not self._response_is_image(response):
+                    response = client.get(url, headers={**headers, "Range": "bytes=0-2048"})
+                if not self._is_reliable_image_url(str(response.url)):
+                    return False
+                return self._response_is_image(response)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _response_is_image(response: httpx.Response) -> bool:
+        if response.status_code >= 400:
+            return False
+        content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type.startswith("image/"):
+            return True
+        path = urlparse(str(response.url)).path.lower()
+        return not content_type and path.endswith(ALLOWED_IMAGE_EXTENSIONS)
 
     def _search_commons(self, query: str, state: PipelineState) -> list[ImageAsset]:
         if not query:
@@ -219,7 +329,7 @@ class ImageResearchAgent(BaseAgent):
             return None
 
         url = image_info.get("url", "")
-        if not url:
+        if not url or not self._is_reliable_image_url(url):
             return None
 
         metadata = image_info.get("extmetadata") or {}
