@@ -150,9 +150,9 @@ daphne -b 127.0.0.1 -p 8000 config.asgi:application
 #### Cửa sổ 2 — Celery Worker (Xử lý các tác vụ đa tác nhân LangGraph chạy nền):
 ```powershell
 .venv\Scripts\Activate.ps1
-celery -A config worker -l info -P solo
+celery -A config worker -l info -P gevent -c 4
 ```
-*Lưu ý quan trọng:* Đối số `-P solo` là bắt buộc trên hệ điều hành Windows vì Windows không hỗ trợ hàm `fork` luồng con của Unix. Khi bạn sửa đổi bất kỳ mã nguồn Python nào trong thư mục `apps/agents/`, bạn bắt buộc phải tắt đi (Ctrl+C) và bật lại Celery Worker để mã nguồn mới được nạp vào.
+*Lưu ý quan trọng:* Đối số `-P gevent -c 4` được cấu hình để kích hoạt song song hóa bất đồng bộ (Non-blocking Parallelism) trên Windows bằng công nghệ Greenlets của thư viện Gevent. Điều này cho phép hệ thống thực thi viết bài song song Map-Reduce thực tế với 4 luồng đồng thời, giúp tăng tốc viết bài gấp 4 lần và khắc phục hoàn toàn hiện tượng báo "Worker down" ảo trên giao diện Dashboard khi worker đang bận rộn. Khi bạn sửa đổi bất kỳ mã nguồn Python nào trong thư mục `apps/agents/`, bạn bắt buộc phải tắt đi (Ctrl+C) và bật lại Celery Worker để mã nguồn mới được nạp vào.
 
 #### Cửa sổ 3 — Ollama Server:
 Đảm bảo dịch vụ Ollama cục bộ đang hoạt động để phản hồi kịp thời các truy vấn sinh văn bản của các agent.

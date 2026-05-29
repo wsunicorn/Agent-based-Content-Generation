@@ -64,7 +64,7 @@ Hệ thống hỗ trợ cơ chế định tuyến nhà cung cấp động vượ
 ## 4. Xử Lý Bất Đồng Bộ & Bộ Nhớ Đệm (Celery + Redis)
 
 * **Celery 5.4:** Điều phối và chạy toàn bộ đồ thị LangGraph dưới dạng tác vụ nền (background tasks), tránh làm nghẽn luồng xử lý chính của máy chủ web.
-  * *Lưu ý trên Windows:* Celery được kích hoạt ở chế độ đơn luồng `-P solo` để tương thích hoàn toàn với nền tảng Windows.
+  * *Tối ưu trên Windows:* Celery được chạy ở chế độ đa luồng song song bất đồng bộ `-P gevent -c 4` giúp chạy song song thực tế các tác nhân viết bài Map-Reduce và phản hồi tức thì các API trạng thái.
 * **Redis 7.x:** Đóng vai trò là cầu nối liên lạc đa năng:
   1. Hàng đợi thông điệp (Message Broker) cho Celery.
   2. Channel Layer lưu trữ các websocket channel cho Django Channels.
