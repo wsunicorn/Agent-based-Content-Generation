@@ -327,12 +327,13 @@
       background: #090b10;
       border: 1px solid rgba(255,255,255,.06);
       border-radius: var(--radius-sm);
-      padding: 12px 14px;
-      height: 150px;
+      padding: 14px 16px;
+      flex: 1;
+      min-height: 260px;
       overflow-y: auto;
       font-family: 'JetBrains Mono', monospace;
-      font-size: .73rem;
-      line-height: 1.75;
+      font-size: .76rem;
+      line-height: 1.85;
       scrollbar-width: thin;
       scrollbar-color: var(--surface-3) transparent;
     }
@@ -610,7 +611,7 @@
     }
     .source-chip:hover { background: rgba(124,108,248,.22); }
 
-    .timeline-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+    .timeline-list { display: none; }
     .timeline-item {
       display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; align-items: center;
       padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -850,7 +851,7 @@
           <span id="status-badge" class="status-pill pill-idle">IDLE</span>
         </div>
       </div>
-      <div class="card-body">
+      <div class="card-body" style="display:flex;flex-direction:column;">
         <div class="pipeline-track" id="pipeline-track"></div>
         <div class="progress-wrap">
           <div id="progress-fill" class="progress-fill animated" style="width:0%"></div>
@@ -1264,6 +1265,16 @@ function handleWsMessage(data, jobId) {
     if (data.agent === 'image_research' && detail.image_assets_count !== undefined) {
       const providers = (detail.providers || []).join(', ') || 'image search';
       tlog('[images] Completed — ' + detail.image_assets_count + ' image(s) selected via ' + providers, 'success');
+      (detail.images || []).forEach(img => {
+        const el = document.getElementById('terminal');
+        const chip = document.createElement('div');
+        chip.className = 'log-line';
+        let host = img.title || 'image';
+        chip.innerHTML = '<span class="log-time">      </span>'
+          + '<a href="'+esc(img.url)+'" target="_blank" rel="noopener" class="source-chip" style="color: var(--teal); border-color: rgba(64,224,208,.3);">🖼️ '+esc(img.title||host)+'</a>';
+        el.appendChild(chip);
+        el.scrollTop = el.scrollHeight;
+      });
     } else if (data.agent === 'research' && detail.sources_count !== undefined) {
       tlog('[research] Completed — found ' + detail.sources_count + ' source(s)', 'success');
       (detail.sources || []).forEach(s => {
@@ -1499,6 +1510,21 @@ async function approveOutline() {
     markNodeDone('outline_review', AGENT_IDS.indexOf('outline_review'));
     setStatusBadge('running');
     document.getElementById('outline-review-status').textContent = 'Approved';
+    
+    // Collapse the review panel to make the UI smoother and cleaner
+    const panel = document.getElementById('outline-review-panel');
+    panel.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+    panel.style.opacity = '0';
+    panel.style.transform = 'translateY(-10px)';
+    
+    setTimeout(() => {
+      panel.classList.add('d-none');
+      panel.style.opacity = '';
+      panel.style.transform = '';
+      // Smooth scroll back to pipeline track to watch progress
+      document.getElementById('pipeline-track').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 400);
+
     tlog('Outline approved. Writer resumed.', 'success');
   } else {
     document.getElementById('outline-review-status').textContent = 'Approve failed';
@@ -1633,7 +1659,14 @@ function renderProgressFromJob(job) {
 /* ─────────────────────────────────────────────────────────────────────
    Terminal
 ───────────────────────────────────────────────────────────────────────── */
+let _lastLogMessages = [];
 function tlog(msg, type) {
+  // Deduplicate: skip if this exact message was one of the last 5
+  const dedupKey = type + ':' + msg;
+  if (_lastLogMessages.includes(dedupKey)) return;
+  _lastLogMessages.push(dedupKey);
+  if (_lastLogMessages.length > 5) _lastLogMessages.shift();
+
   const el  = document.getElementById('terminal');
   const ts  = new Date().toLocaleTimeString();
   const cls = { success:'log-success', error:'log-error', info:'log-info', accent:'log-accent' }[type] || 'log-info';

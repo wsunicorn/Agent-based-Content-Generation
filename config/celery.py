@@ -1,15 +1,5 @@
 """Celery application for content_pipeline project."""
-# Gevent monkey patching for cooperative networking on Windows
-import sys
-if "gevent" in sys.argv:
-    try:
-        from gevent import monkey
-        monkey.patch_all()
-    except ImportError:
-        pass
-
 import os
-
 from celery import Celery
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")

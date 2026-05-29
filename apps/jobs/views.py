@@ -410,15 +410,28 @@ def _image_source_markdown(image_refs):
         if not isinstance(item, dict):
             continue
         title = item.get("title") or "Image"
-        source = item.get("source_url") or item.get("url") or ""
-        line = f"- **{title}**"
+        url = item.get("url") or ""
+        source = item.get("source_url") or url
+        alt_text = item.get("alt_text") or title
+        
+        if url:
+            lines.append(f"![{alt_text}]({url})")
+        
+        caption_parts = []
+        if item.get("caption"):
+            caption_parts.append(f"**{item.get('caption')}**")
+        else:
+            caption_parts.append(f"**{title}**")
+            
         if item.get("license"):
-            line += f" - {item.get('license')}"
+            caption_parts.append(f"License: {item.get('license')}")
         if item.get("attribution"):
-            line += f" - {item.get('attribution')}"
+            caption_parts.append(f"Attribution: {item.get('attribution')}")
         if source:
-            line += f" - {source}"
-        lines.append(line)
+            caption_parts.append(f"[Source link]({source})")
+            
+        lines.append(" - ".join(caption_parts))
+        lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -735,13 +748,32 @@ def health_check(request):
     worker_ok = False
     worker_count = 0
     try:
+        # Try control.ping first (works with some pool types)
         from config.celery import app as celery_app
-
-        replies = celery_app.control.ping(timeout=0.7) or []
+        replies = celery_app.control.ping(timeout=1.0) or []
         worker_count = len(replies)
         worker_ok = worker_count > 0
     except Exception:
         pass
+
+    # Fallback: check Redis for active worker registrations
+    if not worker_ok:
+        try:
+            import redis as redis_lib
+            from django.conf import settings as django_settings
+
+            r = redis_lib.from_url(django_settings.CELERY_BROKER_URL)
+            # Check if there are workers registered via kombu bindings
+            bindings = r.smembers("_kombu.binding.celery")
+            # Also check if the queue is being consumed (workers connected)
+            info = r.info("clients")
+            connected = int(info.get("connected_clients", 0))
+            # If there are bindings and multiple connected clients (Django + workers)
+            if bindings and connected > 1:
+                worker_ok = True
+                worker_count = max(1, connected - 1)  # subtract 1 for non-worker connections
+        except Exception:
+            pass
 
     core_ok = db_ok and redis_ok
     all_ok = core_ok and worker_ok

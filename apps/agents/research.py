@@ -7,6 +7,7 @@ import logging
 from urllib.parse import urlparse
 
 import httpx
+from pydantic import BaseModel, Field
 from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core.cache import cache
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 SOURCE_CONTENT_LIMIT = 1500
 SUMMARY_LIMIT = 3000
+
+
+class WebSearchQuery(BaseModel):
+    query: str = Field(description="A highly effective web search query optimized for an academic or professional search engine. Should be precise and focused.")
 
 
 class ResearchAgent(BaseAgent):
@@ -77,12 +82,35 @@ class ResearchAgent(BaseAgent):
             from tavily import TavilyClient
 
             client = TavilyClient(api_key=api_key)
-            query = state.topic
-            if state.keywords:
-                query = f"{state.topic} ({', '.join(state.keywords[:3])})"
+            
+            # Use LLM to generate an optimal search query
             domain_terms = get_domain_search_terms(state.domain)
-            if domain_terms:
-                query = f"{query} {domain_terms}"
+            system_prompt = (
+                "You are an expert web researcher. Analyze the topic, keywords, and target domain "
+                "to produce exactly ONE highly effective, precise search query string (max 8 words) for a web search engine."
+            )
+            user_prompt = (
+                f"Topic: {state.topic}\n"
+                f"Keywords: {', '.join(state.keywords[:3])}\n"
+                f"Target Domain: {state.domain}\n"
+                f"Domain-specific search terms context: {domain_terms}\n\n"
+                "Provide the best search query."
+            )
+            
+            try:
+                response = self._call_llm(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    output_schema=WebSearchQuery
+                )
+                query = response.query
+            except Exception as exc:
+                logger.warning("[ResearchAgent] Failed to generate smart web query, falling back to naive: %s", exc)
+                query = state.topic
+                if state.keywords:
+                    query = f"{state.topic} ({', '.join(state.keywords[:3])})"
+                if domain_terms:
+                    query = f"{query} {domain_terms}"
 
             response = client.search(
                 query=query,

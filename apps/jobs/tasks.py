@@ -221,6 +221,11 @@ def run_pipeline(self, job_id: str):
                     image_assets = node_output.get("image_assets", []) or []
                     detail = {
                         "image_assets_count": len(image_assets),
+                        "images": [
+                            {"title": img.get("title", ""), "url": img.get("source_url", img.get("url", ""))}
+                            for img in image_assets[:6]
+                            if isinstance(img, dict)
+                        ],
                         "providers": sorted({
                             item.get("provider", "")
                             for item in image_assets
