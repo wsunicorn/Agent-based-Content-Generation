@@ -50,11 +50,17 @@ def job_list_create(request):
     serializer.is_valid(raise_exception=True)
     job = serializer.save()
 
-    # Dispatch Celery task
-    task = run_pipeline.delay(str(job.id))
-    job.celery_task_id = task.id
+    import uuid
+    from django.db import transaction
+
+    # Predetermine task ID to prevent Django-Celery transaction race condition
+    task_id = str(uuid.uuid4())
+    job.celery_task_id = task_id
     job.status = Job.Status.RUNNING
     job.save(update_fields=["celery_task_id", "status"])
+
+    # Dispatch Celery task only after transaction has successfully committed
+    transaction.on_commit(lambda: run_pipeline.apply_async(args=[str(job.id)], task_id=task_id))
 
     return Response(JobDetailSerializer(job).data, status=status.HTTP_201_CREATED)
 
@@ -193,10 +199,18 @@ def job_approve_outline(request, pk):
         content_json={"sections": sections, "approved": True},
         version=_next_artifact_version(job, Artifact.ArtifactType.OUTLINE),
     )
-    task = run_pipeline.delay(str(job.id))
-    job.celery_task_id = task.id
+    import uuid
+    from django.db import transaction
+
+    # Predetermine task ID to prevent Django-Celery transaction race condition
+    task_id = str(uuid.uuid4())
+    job.celery_task_id = task_id
     job.save(update_fields=["celery_task_id"])
-    return Response({"detail": "Outline approved.", "task_id": task.id, "sections": sections})
+
+    # Dispatch Celery task only after transaction has successfully committed
+    transaction.on_commit(lambda: run_pipeline.apply_async(args=[str(job.id)], task_id=task_id))
+
+    return Response({"detail": "Outline approved.", "task_id": task_id, "sections": sections})
 
 
 @api_view(["POST"])
@@ -238,10 +252,18 @@ def job_regenerate_section(request, pk, section_id):
         "outline_approved_at",
         "status",
     ])
-    task = run_pipeline.delay(str(job.id))
-    job.celery_task_id = task.id
+    import uuid
+    from django.db import transaction
+
+    # Predetermine task ID to prevent Django-Celery transaction race condition
+    task_id = str(uuid.uuid4())
+    job.celery_task_id = task_id
     job.save(update_fields=["celery_task_id"])
-    return Response({"detail": "Section regeneration started.", "task_id": task.id})
+
+    # Dispatch Celery task only after transaction has successfully committed
+    transaction.on_commit(lambda: run_pipeline.apply_async(args=[str(job.id)], task_id=task_id))
+
+    return Response({"detail": "Section regeneration started.", "task_id": task_id})
 
 
 def _normalise_outline_sections(raw_sections):
