@@ -14,6 +14,7 @@ from django.core.cache import cache
 from apps.pipeline.state import PipelineState, SourceDocument
 
 from .base import BaseAgent
+from .domain_guides import get_domain_guide_text, get_domain_search_terms
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,14 @@ class ResearchAgent(BaseAgent):
         logger.info("[ResearchAgent] Starting research for: %s", state.topic[:80])
         state.current_agent = self.name
 
+        image_sources = [
+            source
+            for source in state.sources
+            if source.source_type == "image"
+        ]
         raw_sources = self._search_tavily(state)
         sources = self._scrape_and_trim(raw_sources)
-        state.sources = sources[: self._max_sources(state)]
+        state.sources = image_sources + sources[: self._max_sources(state)]
 
         state.research_summary = self._summarise(state)
         if state.sources and not self._summary_was_cached:
@@ -61,7 +67,7 @@ class ResearchAgent(BaseAgent):
             logger.warning("[ResearchAgent] TAVILY_API_KEY not set - skipping web search.")
             return []
 
-        cache_key = self._cache_key("search", state.topic, state.keywords)
+        cache_key = self._cache_key("search", state.topic, state.keywords, state.domain)
         cached = cache.get(cache_key)
         if cached is not None:
             logger.info("[ResearchAgent] Tavily cache hit.")
@@ -74,6 +80,9 @@ class ResearchAgent(BaseAgent):
             query = state.topic
             if state.keywords:
                 query = f"{state.topic} ({', '.join(state.keywords[:3])})"
+            domain_terms = get_domain_search_terms(state.domain)
+            if domain_terms:
+                query = f"{query} {domain_terms}"
 
             response = client.search(
                 query=query,
@@ -142,15 +151,20 @@ class ResearchAgent(BaseAgent):
 
     def _summarise(self, state: PipelineState) -> str:
         self._summary_was_cached = False
-        if not state.sources:
+        text_sources = [
+            source for source in state.sources if source.source_type != "image"
+        ]
+        if not text_sources:
             return ""
 
         cache_key = self._cache_key(
             "summary",
             state.topic,
+            state.domain,
+            state.audience,
             state.keywords,
-            [source.url for source in state.sources],
-            [source.content[:300] for source in state.sources],
+            [source.url for source in text_sources],
+            [source.content[:300] for source in text_sources],
         )
         cached = cache.get(cache_key)
         if cached is not None:
@@ -160,18 +174,20 @@ class ResearchAgent(BaseAgent):
 
         source_text = "\n\n".join(
             f"Source {i + 1}: {source.title}\n{source.content}"
-            for i, source in enumerate(state.sources)
+            for i, source in enumerate(text_sources)
         )
 
         system_prompt = (
             "You are a research assistant. Summarise the provided sources into a "
             "concise, factual overview. Focus on key facts, statistics, and "
-            "viewpoints relevant to the topic. Maximum 300 words."
+            "viewpoints relevant to the topic and domain. Maximum 300 words."
         )
         user_prompt = (
             f"Topic: {state.topic}\n\n"
+            f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Sources:\n{source_text}\n\n"
-            "Write a 200-300 word research summary."
+            "Write a 200-300 word research summary. Prioritise domain-relevant evidence, "
+            "source caveats, terminology, and safety/compliance cautions."
         )
 
         response = self._call_llm(system_prompt, user_prompt)

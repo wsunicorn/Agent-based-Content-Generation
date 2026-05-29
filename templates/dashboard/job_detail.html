@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ job.title|truncatechars:60 }} — AI Content Pipeline</title>
+  <title>{{ job.title|truncatechars:60 }} — Domain LLM Assistant</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -234,6 +234,16 @@
     .article-body hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
     .article-body a { color: var(--accent-3); text-underline-offset: 3px; }
     .article-body a:hover { color: var(--accent); }
+    .article-body img {
+      display: block;
+      max-width: 100%;
+      max-height: 520px;
+      object-fit: contain;
+      margin: 1.4rem auto .6rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+    }
 
     /* ── Raw / SEO tabs ── */
     .raw-view {
@@ -358,8 +368,8 @@
 <nav class="topbar">
   <div class="topbar-logo">🤖</div>
   <div>
-    <div class="topbar-title">AI Content Pipeline</div>
-    <div class="topbar-sub">Article Viewer</div>
+    <div class="topbar-title">Domain LLM Assistant</div>
+    <div class="topbar-sub">Domain-guided Article Viewer</div>
   </div>
   <button id="theme-toggle-btn" class="theme-toggle" title="Switch light / dark">☀️</button>
   <a href="/" class="topbar-back">← Dashboard</a>
@@ -371,6 +381,9 @@
   <div class="article-meta">
     <div class="meta-chips">
       <span class="chip type-chip">{{ job.content_type|title|cut:"_" }}</span>
+      <span class="chip">{{ job.domain|title }}</span>
+      {% if job.audience %}<span class="chip">{{ job.audience }}</span>{% endif %}
+      {% if job.tone %}<span class="chip">{{ job.tone|title }}</span>{% endif %}
       <span class="chip {% if job.status == 'completed' %}status-done{% elif job.status == 'failed' %}status-fail{% endif %}">
         {{ job.status|upper }}
       </span>
@@ -484,6 +497,8 @@ function mdToHtml(md) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     // italic
     .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+    // images
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
     // links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
 
@@ -567,13 +582,14 @@ async function loadQA() {
       clarity: qa.clarity_score,
       accuracy: qa.accuracy_score,
       engagement: qa.engagement_score,
+      format_adherence: qa.format_adherence_score,
       seo: qa.seo_score,
       completeness: qa.completeness_score,
     };
     const issues = qa.issues || qa.feedback || [];
     const html = Object.entries(criteria).map(([name, val]) => {
       const s   = typeof val === 'object' ? (val.score || 0) : (val || 0);
-      const max = ['clarity', 'accuracy'].includes(name) ? 25 : (name === 'engagement' ? 20 : 15);
+      const max = ['clarity', 'accuracy'].includes(name) ? 20 : 15;
       const pct = max ? (s / max * 100) : 0;
       const cls = pct >= 80 ? 'high' : pct >= 60 ? 'mid' : 'low';
       return '<div class="qa-criterion"><div class="qa-crit-name">' + esc(name.replace(/_/g,' ')) + '</div>'

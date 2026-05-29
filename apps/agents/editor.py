@@ -20,6 +20,7 @@ from apps.pipeline.state import PipelineState
 
 from .base import BaseAgent
 from .content_guides import get_content_type_guide
+from .domain_guides import get_domain_guide_text
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,9 @@ class EditorAgent(BaseAgent):
             "You are a senior editor. Review and improve the provided draft for: "
             "clarity, flow, grammar, factual consistency, and adherence to the article "
             "brief. Make targeted improvements while preserving the requested content "
-            "type format.\n\n"
+            "type format. Do not collapse required sections, do not turn one content "
+            "type into another, and keep the article aligned with the provided template. "
+            "Preserve all Markdown image blocks and their attribution/caption text exactly.\n\n"
             "Respond using EXACTLY these three sections in order:\n\n"
             f"{_CHANGES_MARKER}\n"
             "- bullet point for each significant change you made\n\n"
@@ -58,9 +61,13 @@ class EditorAgent(BaseAgent):
         user_prompt = (
             f"Article topic: {state.topic}\n"
             f"Content type: {state.content_type.replace('_', ' ').title()}\n"
+            f"Domain: {state.domain}\n"
+            f"Audience: {state.audience or 'general'}\n"
+            f"Tone: {state.tone or 'clear'}\n"
             f"Target length: {state.target_length} words\n"
             f"Keywords: {', '.join(state.keywords) if state.keywords else 'none'}\n\n"
             f"Content type guide:\n{get_content_type_guide(state.content_type)}\n\n"
+            f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Additional instructions:\n{state.additional_instructions or 'None'}\n\n"
             f"DRAFT TO EDIT:\n{draft}"
         )

@@ -1,10 +1,10 @@
 """
-QA Agent — scores the final content on 5 dimensions.
+QA Agent scores the final content on 6 dimensions.
 
 Token optimisation:
-  • Completeness (15 pts) and SEO (15 pts) computed with pure Python.
-  • Single LLM call for clarity (25), accuracy (25), engagement (20).
-  • Pass threshold: 75 / 100.
+  - Completeness (15 pts) and SEO (15 pts) are computed with pure Python.
+  - One LLM call scores clarity (20), accuracy (20), engagement (15), and format (15).
+  - Pass threshold: 75 / 100.
 """
 from __future__ import annotations
 
@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 from apps.pipeline.state import PipelineState, QAReport
 
 from .base import BaseAgent
-from .content_guides import get_content_type_guide
+from .content_guides import get_content_type_guide, get_required_elements
+from .domain_guides import get_domain_guide_text
+from .image_research import markdown_for_image
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +26,10 @@ PASS_THRESHOLD = 75.0
 
 
 class QAScores(BaseModel):
-    clarity_score: float = Field(ge=0, le=25, description="Clarity and readability (0-25)")
-    accuracy_score: float = Field(ge=0, le=25, description="Factual accuracy (0-25)")
-    engagement_score: float = Field(ge=0, le=20, description="Reader engagement (0-20)")
+    clarity_score: float = Field(ge=0, le=20, description="Clarity and readability (0-20)")
+    accuracy_score: float = Field(ge=0, le=20, description="Factual accuracy (0-20)")
+    engagement_score: float = Field(ge=0, le=15, description="Reader engagement (0-15)")
+    format_adherence_score: float = Field(ge=0, le=15, description="Content type format adherence (0-15)")
     feedback: list[str] = Field(default_factory=list, description="Actionable feedback items")
     decision: str = Field(default="review", description="approve, revise, or fail_with_warning")
     next_action: str = Field(default="revise_editor")
@@ -44,7 +47,7 @@ class QAAgent(BaseAgent):
         logger.info("[QAAgent] Scoring content")
         state.current_agent = self.name
 
-        text = state.edited_draft or state.draft
+        text = self._ensure_image_assets(state.edited_draft or state.draft, state)
         if not text:
             logger.warning("[QAAgent] No content to score")
             return state
@@ -64,6 +67,7 @@ class QAAgent(BaseAgent):
             llm_scores.clarity_score
             + llm_scores.accuracy_score
             + llm_scores.engagement_score
+            + llm_scores.format_adherence_score
             + seo_pts
             + completeness
         )
@@ -73,6 +77,7 @@ class QAAgent(BaseAgent):
             clarity_score=llm_scores.clarity_score,
             accuracy_score=llm_scores.accuracy_score,
             engagement_score=llm_scores.engagement_score,
+            format_adherence_score=llm_scores.format_adherence_score,
             seo_score=seo_pts,
             completeness_score=completeness,
             passed=total >= PASS_THRESHOLD,
@@ -89,6 +94,7 @@ class QAAgent(BaseAgent):
 
         if report.passed:
             state.final_content = text
+            state.edited_draft = text
             state.completed = True
             logger.info("[QAAgent] PASSED with score %.1f", total)
         else:
@@ -96,6 +102,19 @@ class QAAgent(BaseAgent):
             logger.info("[QAAgent] FAILED with score %.1f — needs revision", total)
 
         return state
+
+    @staticmethod
+    def _ensure_image_assets(text: str, state: PipelineState) -> str:
+        """Reinsert auto-selected images if an editor model accidentally removed them."""
+        if not text or not state.image_assets:
+            return text
+
+        missing = [asset for asset in state.image_assets if asset.url and asset.url not in text]
+        if not missing:
+            return text
+
+        blocks = "\n\n".join(markdown_for_image(asset) for asset in missing)
+        return f"{text.rstrip()}\n\n## Visual References\n\n{blocks}".strip()
 
     # ------------------------------------------------------------------ #
     # Pure-Python scoring helpers
@@ -136,9 +155,10 @@ class QAAgent(BaseAgent):
         word_count = len(text.split())
         target = max(1, state.target_length)
         length_ratio = min(1.2, word_count / target)
-        clarity = 20.0 if word_count >= 80 else 15.0
-        accuracy = 22.0 if state.fact_check_passed else 17.0
-        engagement = 16.0 if length_ratio >= 0.65 else 12.0
+        clarity = 18.0 if word_count >= 80 else 13.0
+        accuracy = 18.0 if state.fact_check_passed else 13.0
+        engagement = 13.0 if length_ratio >= 0.65 else 9.0
+        format_adherence = self._format_heuristic_score(state, text)
         feedback = []
         if length_ratio < 0.65:
             feedback.append("Draft is shorter than expected.")
@@ -148,6 +168,7 @@ class QAAgent(BaseAgent):
             clarity_score=clarity,
             accuracy_score=accuracy,
             engagement_score=engagement,
+            format_adherence_score=format_adherence,
             feedback=feedback or ["Fast QA heuristic passed."],
             decision="approve",
             next_action="approve",
@@ -156,13 +177,39 @@ class QAAgent(BaseAgent):
             revision_instructions="",
         )
 
+    def _format_heuristic_score(self, state: PipelineState, text: str) -> float:
+        """Cheap fallback score for template shape when LLM QA is disabled."""
+        lower = text.lower()
+        score = 6.0
+
+        heading_count = lower.count("\n## ")
+        if heading_count >= max(2, min(4, len(state.sections))):
+            score += 3.0
+
+        for element in get_required_elements(state.content_type):
+            words = [part for part in element.lower().replace("/", " ").split() if len(part) >= 4]
+            if any(word in lower for word in words):
+                score += 1.25
+
+        if state.content_type == "tutorial" and any(marker in lower for marker in ["step", "bước", "prerequisite", "điều kiện"]):
+            score += 2.0
+        elif state.content_type == "technical_report" and any(marker in lower for marker in ["method", "scope", "finding", "limitation", "phạm vi", "hạn chế"]):
+            score += 2.0
+        elif state.content_type == "news_article" and any(marker in lower for marker in ["according", "said", "impact", "cho biết", "theo"]):
+            score += 2.0
+        elif state.content_type == "blog_post" and any(marker in lower for marker in ["example", "takeaway", "ví dụ", "bài học"]):
+            score += 2.0
+
+        return min(15.0, round(score, 1))
+
     def _llm_score(self, state: PipelineState, text: str) -> QAScores:
         system_prompt = (
             "You are a quality assurance reviewer for content. Score the article "
-            "on three dimensions (use exact numeric scores within the valid ranges):\n"
-            "• clarity_score: 0-25 (readability, sentence structure, logical flow)\n"
-            "• accuracy_score: 0-25 (factual correctness, no contradictions)\n"
-            "• engagement_score: 0-20 (hook, compelling voice, call-to-action)\n"
+            "on four dimensions (use exact numeric scores within the valid ranges):\n"
+            "- clarity_score: 0-20 (readability, sentence structure, logical flow)\n"
+            "- accuracy_score: 0-20 (factual correctness, no contradictions)\n"
+            "- engagement_score: 0-15 (hook, usefulness, reader momentum)\n"
+            "- format_adherence_score: 0-15 (fit with the requested content type template)\n"
             "Also provide 2-5 concise actionable feedback items and routing instructions.\n"
             "Allowed next_action values: approve, redo_research, redo_outline, "
             "rewrite_section, revise_editor, redo_fact_check, redo_seo, fail_with_warning.\n"
@@ -175,9 +222,13 @@ class QAAgent(BaseAgent):
         user_prompt = (
             f"Topic: {state.topic}\n"
             f"Content type: {state.content_type.replace('_', ' ').title()}\n"
+            f"Domain: {state.domain}\n"
+            f"Audience: {state.audience or 'general'}\n"
+            f"Tone: {state.tone or 'clear'}\n"
             f"Word count: {state.word_count} / {state.target_length} target\n\n"
             f"Section map:\n{section_map}\n\n"
             f"Content type guide:\n{get_content_type_guide(state.content_type)}\n\n"
+            f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Additional instructions:\n{state.additional_instructions or 'None'}\n\n"
             f"ARTICLE:\n{snippet}\n\n"
             "Score the article."
@@ -189,9 +240,10 @@ class QAAgent(BaseAgent):
             return result
 
         return QAScores(
-            clarity_score=15.0,
-            accuracy_score=15.0,
-            engagement_score=10.0,
+            clarity_score=12.0,
+            accuracy_score=12.0,
+            engagement_score=8.0,
+            format_adherence_score=8.0,
             feedback=["Unable to parse QA scores — using defaults."],
             decision="revise",
             next_action="revise_editor",
@@ -242,15 +294,23 @@ class QAAgent(BaseAgent):
             report.target_agent = "writer"
             report.target_section_ids = []
             report.decision = "revise"
+        elif report.format_adherence_score < 8:
+            report.next_action = "redo_outline"
+            report.target_agent = "outline"
+            report.decision = "revise"
+        elif report.format_adherence_score < 11:
+            report.next_action = "revise_editor"
+            report.target_agent = "editor"
+            report.decision = "revise"
         elif report.seo_score < 10:
             report.next_action = "redo_seo"
             report.target_agent = "seo"
             report.decision = "revise"
-        elif report.accuracy_score < 16 or len(state.unverified_claims) >= 5:
+        elif report.accuracy_score < 12 or len(state.unverified_claims) >= 5:
             report.next_action = "redo_fact_check"
             report.target_agent = "fact_checker"
             report.decision = "revise"
-        elif report.clarity_score < 17 or report.engagement_score < 13:
+        elif report.clarity_score < 12 or report.engagement_score < 9:
             report.next_action = "revise_editor"
             report.target_agent = "editor"
             report.decision = "revise"

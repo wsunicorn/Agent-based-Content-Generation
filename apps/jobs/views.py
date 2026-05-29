@@ -20,6 +20,24 @@ from .serializers import (
 from .tasks import run_pipeline
 
 
+def _normalise_create_payload(request):
+    if hasattr(request.data, "lists"):
+        data = {
+            key: values[-1] if len(values) == 1 else values
+            for key, values in request.data.lists()
+        }
+    else:
+        data = dict(request.data)
+
+    keywords = data.get("keywords")
+    if isinstance(keywords, str):
+        data["keywords"] = [kw.strip() for kw in keywords.split(",") if kw.strip()]
+    elif isinstance(keywords, list) and len(keywords) == 1 and isinstance(keywords[0], str):
+        data["keywords"] = [kw.strip() for kw in keywords[0].split(",") if kw.strip()]
+
+    return data
+
+
 @api_view(["GET", "POST"])
 def job_list_create(request):
     if request.method == "GET":
@@ -27,7 +45,8 @@ def job_list_create(request):
         serializer = JobListSerializer(jobs, many=True)
         return Response(serializer.data)
 
-    serializer = JobCreateSerializer(data=request.data)
+    payload = _normalise_create_payload(request)
+    serializer = JobCreateSerializer(data=payload)
     serializer.is_valid(raise_exception=True)
     job = serializer.save()
 
@@ -92,6 +111,173 @@ def job_artifact(request, pk, artifact_type):
     return Response(ArtifactSerializer(artifact).data)
 
 
+@api_view(["GET"])
+def job_evidence(request, pk):
+    job = get_object_or_404(Job, pk=pk)
+    source_artifact = (
+        job.artifacts.filter(artifact_type=Artifact.ArtifactType.SOURCE_DOCUMENTS)
+        .order_by("-version", "-created_at")
+        .first()
+    )
+    image_artifact = (
+        job.artifacts.filter(artifact_type=Artifact.ArtifactType.IMAGE_ASSETS)
+        .order_by("-version", "-created_at")
+        .first()
+    )
+    outline_artifact = (
+        job.artifacts.filter(artifact_type=Artifact.ArtifactType.OUTLINE)
+        .order_by("-version", "-created_at")
+        .first()
+    )
+    sources = []
+    if source_artifact and isinstance(source_artifact.content_json, dict):
+        sources = source_artifact.content_json.get("sources") or []
+    images = []
+    if image_artifact and isinstance(image_artifact.content_json, dict):
+        images = image_artifact.content_json.get("image_assets") or []
+    outline = []
+    if outline_artifact and isinstance(outline_artifact.content_json, dict):
+        outline = outline_artifact.content_json.get("sections") or []
+    return Response(
+        {
+            "sources": sources if isinstance(sources, list) else [],
+            "images": images if isinstance(images, list) else [],
+            "outline": outline if isinstance(outline, list) else [],
+        }
+    )
+
+
+@api_view(["POST"])
+def job_approve_outline(request, pk):
+    job = get_object_or_404(Job, pk=pk)
+    if not job.pipeline_state:
+        return Response(
+            {"detail": "No paused pipeline checkpoint is available for this job."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if job.status != Job.Status.PAUSED:
+        return Response(
+            {"detail": "Job is not waiting for outline approval."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    sections = _normalise_outline_sections(request.data.get("sections") or [])
+    if not sections:
+        latest = (
+            job.artifacts.filter(artifact_type=Artifact.ArtifactType.OUTLINE)
+            .order_by("-version", "-created_at")
+            .first()
+        )
+        if latest and isinstance(latest.content_json, dict):
+            sections = _normalise_outline_sections(latest.content_json.get("sections") or [])
+    if not sections:
+        return Response({"detail": "Outline sections are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    job.approved_outline = sections
+    job.outline_approved_at = timezone.now()
+    checkpoint = dict(job.pipeline_state or {})
+    checkpoint["sections"] = sections
+    checkpoint["outline_approved"] = True
+    checkpoint["completed"] = False
+    job.pipeline_state = checkpoint
+    job.status = Job.Status.RUNNING
+
+    job.save(update_fields=[
+        "approved_outline",
+        "outline_approved_at",
+        "pipeline_state",
+        "status",
+    ])
+    Artifact.objects.create(
+        job=job,
+        artifact_type=Artifact.ArtifactType.OUTLINE,
+        content_json={"sections": sections, "approved": True},
+        version=_next_artifact_version(job, Artifact.ArtifactType.OUTLINE),
+    )
+    task = run_pipeline.delay(str(job.id))
+    job.celery_task_id = task.id
+    job.save(update_fields=["celery_task_id"])
+    return Response({"detail": "Outline approved.", "task_id": task.id, "sections": sections})
+
+
+@api_view(["POST"])
+def job_regenerate_section(request, pk, section_id):
+    job = get_object_or_404(Job, pk=pk)
+    if job.status != Job.Status.COMPLETED:
+        return Response(
+            {"detail": "Section regeneration is available after a completed job."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not job.pipeline_state:
+        return Response(
+            {"detail": "No pipeline checkpoint available for this job."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    checkpoint = dict(job.pipeline_state)
+    sections = checkpoint.get("sections") or job.approved_outline or []
+    if not sections:
+        return Response({"detail": "No outline found for regeneration."}, status=status.HTTP_400_BAD_REQUEST)
+
+    checkpoint["sections"] = _normalise_outline_sections(sections)
+    checkpoint["outline_approved"] = True
+    checkpoint["revision_target_section_ids"] = [int(section_id)]
+    checkpoint["revision_instructions"] = (
+        request.data.get("instructions")
+        or f"Regenerate section {section_id} while preserving the rest of the article."
+    )
+    checkpoint["revision_count"] = int(checkpoint.get("revision_count") or 0) + 1
+    checkpoint["completed"] = False
+    checkpoint["final_content"] = ""
+
+    job.pipeline_state = checkpoint
+    job.approved_outline = checkpoint["sections"]
+    job.outline_approved_at = job.outline_approved_at or timezone.now()
+    job.status = Job.Status.RUNNING
+    job.save(update_fields=[
+        "pipeline_state",
+        "approved_outline",
+        "outline_approved_at",
+        "status",
+    ])
+    task = run_pipeline.delay(str(job.id))
+    job.celery_task_id = task.id
+    job.save(update_fields=["celery_task_id"])
+    return Response({"detail": "Section regeneration started.", "task_id": task.id})
+
+
+def _normalise_outline_sections(raw_sections):
+    sections = []
+    for item in raw_sections:
+        if not isinstance(item, dict):
+            continue
+        heading = str(item.get("heading") or "").strip()
+        brief = str(item.get("brief") or "").strip()
+        if not heading:
+            continue
+        key_points = item.get("key_points") or []
+        if isinstance(key_points, str):
+            key_points = [line.strip("- ").strip() for line in key_points.splitlines()]
+        sections.append(
+            {
+                "heading": heading[:180],
+                "level": int(item.get("level") or 1),
+                "brief": brief[:1000],
+                "key_points": [str(point).strip() for point in key_points if str(point).strip()][:8],
+                "template_role": str(item.get("template_role") or "").strip()[:120],
+            }
+        )
+    return sections
+
+
+def _next_artifact_version(job, artifact_type):
+    latest = (
+        Artifact.objects.filter(job=job, artifact_type=artifact_type)
+        .order_by("-version")
+        .values_list("version", flat=True)
+        .first()
+    )
+    return int(latest or 0) + 1
+
+
 @api_view(["POST"])
 def job_cancel(request, pk):
     job = get_object_or_404(Job, pk=pk)
@@ -152,28 +338,33 @@ def job_export(request, pk):
         job.artifacts.filter(artifact_type=Artifact.ArtifactType.QA_REPORT)
         .order_by("-version").first()
     )
+    image_artifact = (
+        job.artifacts.filter(artifact_type=Artifact.ArtifactType.IMAGE_ASSETS)
+        .order_by("-version").first()
+    )
 
     content = final_artifact.content_text
     seo = seo_artifact.content_json if seo_artifact else {}
     qa_score = (qa_artifact.content_json or {}).get("overall_score", "N/A") if qa_artifact else "N/A"
+    image_refs = _image_references(image_artifact)
 
     slug = seo.get("slug") or re.sub(r"[^a-z0-9]+", "-", job.title.lower())[:60]
     filename_base = slug.strip("-")
 
     if fmt == "markdown":
-        md = _build_markdown(job, content, seo, qa_score)
+        md = _build_markdown(job, content, seo, qa_score, image_refs)
         response = HttpResponse(md, content_type="text/markdown; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename_base}.md"'
         return response
 
     elif fmt == "html":
-        html = _build_html(job, content, seo, qa_score)
+        html = _build_html(job, content, seo, qa_score, image_refs)
         response = HttpResponse(html, content_type="text/html; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="{filename_base}.html"'
         return response
 
     else:  # docx
-        doc_bytes = _build_docx(job, content, seo, qa_score)
+        doc_bytes = _build_docx(job, content, seo, qa_score, image_refs)
         response = HttpResponse(
             doc_bytes,
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -182,7 +373,34 @@ def job_export(request, pk):
         return response
 
 
-def _build_markdown(job, content, seo, qa_score):
+def _image_references(artifact):
+    if not artifact or not isinstance(artifact.content_json, dict):
+        return []
+    refs = artifact.content_json.get("image_assets") or []
+    return refs if isinstance(refs, list) else []
+
+
+def _image_source_markdown(image_refs):
+    if not image_refs:
+        return ""
+    lines = ["", "", "## Image Sources"]
+    for item in image_refs:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or "Image"
+        source = item.get("source_url") or item.get("url") or ""
+        line = f"- **{title}**"
+        if item.get("license"):
+            line += f" - {item.get('license')}"
+        if item.get("attribution"):
+            line += f" - {item.get('attribution')}"
+        if source:
+            line += f" - {source}"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def _build_markdown(job, content, seo, qa_score, image_refs=None):
     meta_title = seo.get("meta_title", job.title)
     meta_desc  = seo.get("meta_description", "")
     focus_kw   = seo.get("focus_keyword", "")
@@ -194,23 +412,29 @@ def _build_markdown(job, content, seo, qa_score):
         description: "{meta_desc}"
         focus_keyword: "{focus_kw}"
         content_type: "{job.content_type}"
+        domain: "{getattr(job, 'domain', '')}"
+        audience: "{getattr(job, 'audience', '')}"
+        tone: "{getattr(job, 'tone', '')}"
         word_count: {job.artifacts.filter(artifact_type=Artifact.ArtifactType.FINAL_CONTENT).values_list('word_count', flat=True).first() or 'N/A'}
         qa_score: {qa_score}
         generated: "{date_str}"
         ---
 
         """)
-    return header + content
+    return header + content + _image_source_markdown(image_refs or [])
 
 
-def _build_html(job, content, seo, qa_score):
+def _build_html(job, content, seo, qa_score, image_refs=None):
     import markdown2
     meta_title = seo.get("meta_title", job.title)
     meta_desc  = seo.get("meta_description", "")
     focus_kw   = seo.get("focus_keyword", "")
     date_str   = (job.completed_at or timezone.now()).strftime("%B %d, %Y")
 
-    body_html = markdown2.markdown(content, extras=["fenced-code-blocks", "tables", "header-ids"])
+    body_html = markdown2.markdown(
+        content + _image_source_markdown(image_refs or []),
+        extras=["fenced-code-blocks", "tables", "header-ids"],
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -249,14 +473,14 @@ def _build_html(job, content, seo, qa_score):
   </div>
   {body_html}
   <div class="footer">
-    Generated by AI Content Pipeline · {_esc(job.title)}
+    Generated by Domain LLM Assistant · {_esc(job.title)}
   </div>
 </div>
 </body>
 </html>"""
 
 
-def _build_docx(job, content, seo, qa_score):
+def _build_docx(job, content, seo, qa_score, image_refs=None):
     from docx import Document
     from docx.shared import Inches, Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -316,11 +540,20 @@ def _build_docx(job, content, seo, qa_score):
             para = doc.add_paragraph()
             _add_inline_formatted(para, stripped)
 
+    if image_refs:
+        doc.add_paragraph()
+        doc.add_paragraph("Image sources", style="Heading 2")
+        for item in image_refs:
+            label = item.get("caption") or item.get("alt_text") or item.get("title") or "Image"
+            source = item.get("source_url") or item.get("url") or ""
+            suffix = f" Source: {source}" if source else ""
+            doc.add_paragraph(f"{label}{suffix}", style="List Bullet")
+
     # Footer metadata
     doc.add_paragraph()
     footer_para = doc.add_paragraph()
     footer_run = footer_para.add_run(
-        f"Focus keyword: {focus_kw}  ·  Generated by AI Content Pipeline"
+        f"Focus keyword: {focus_kw}  ·  Generated by Domain LLM Assistant"
     )
     footer_run.font.size = Pt(8)
     footer_run.font.color.rgb = RGBColor(0x9c, 0xa3, 0xaf)
@@ -477,13 +710,28 @@ def health_check(request):
     except Exception:
         pass
 
-    status_code = 200 if (db_ok and redis_ok) else 503
+    worker_ok = False
+    worker_count = 0
+    try:
+        from config.celery import app as celery_app
+
+        replies = celery_app.control.ping(timeout=0.7) or []
+        worker_count = len(replies)
+        worker_ok = worker_count > 0
+    except Exception:
+        pass
+
+    core_ok = db_ok and redis_ok
+    all_ok = core_ok and worker_ok
+    status_code = 200 if core_ok else 503
     return Response(
         {
-            "status": "ok" if (db_ok and redis_ok) else "degraded",
+            "status": "ok" if all_ok else "degraded",
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
             "db": db_ok,
             "redis": redis_ok,
+            "worker": worker_ok,
+            "worker_count": worker_count,
         },
         status=status_code,
     )

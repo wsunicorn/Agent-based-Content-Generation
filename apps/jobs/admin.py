@@ -52,13 +52,14 @@ class RevisionInline(admin.TabularInline):
 class JobAdmin(admin.ModelAdmin):
     list_display = (
         "title_short",
+        "domain",
         "content_type",
         "status_badge",
         "llm_calls_count",
         "duration_display",
         "created_at",
     )
-    list_filter = ("status", "content_type", "created_at")
+    list_filter = ("status", "domain", "content_type", "created_at")
     search_fields = ("title", "topic")
     readonly_fields = (
         "id",
@@ -80,10 +81,25 @@ class JobAdmin(admin.ModelAdmin):
                     "id",
                     "title",
                     "topic",
+                    "domain",
+                    "audience",
+                    "tone",
                     "content_type",
                     "target_length",
                     "keywords",
+                    "language",
                     "additional_instructions",
+                    "outline_review_required",
+                )
+            },
+        ),
+        (
+            "Outline Review",
+            {
+                "fields": (
+                    "approved_outline",
+                    "outline_approved_at",
+                    "pipeline_state",
                 )
             },
         ),

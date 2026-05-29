@@ -6,6 +6,7 @@ config:
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	coordinator(coordinator)
+	image_research(image_research)
 	research(research)
 	outline(outline)
 	writer(writer)
@@ -18,15 +19,17 @@ graph TD;
 	qa(qa)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> coordinator;
-	coordinator --> research;
 	editor --> coordinator_router;
 	fact_checker --> coordinator_router;
+	image_research --> research;
 	join_draft --> editor;
 	outline --> writer;
 	qa --> coordinator_router;
 	research --> outline;
 	section_writer --> join_draft;
 	seo --> coordinator_router;
+	coordinator -.-> image_research;
+	coordinator -.-> writer;
 	writer -.-> section_writer;
 	writer -.-> join_draft;
 	coordinator_router -.-> research;

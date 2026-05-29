@@ -44,6 +44,26 @@ class Command(BaseCommand):
             help="Target word count (default: 1500)",
         )
         parser.add_argument(
+            "--domain",
+            type=str,
+            default="tech",
+            choices=["tech", "marketing", "education", "finance", "healthcare", "legal"],
+            help="Domain guide to apply (default: tech)",
+        )
+        parser.add_argument(
+            "--audience",
+            type=str,
+            default="",
+            help="Target audience (e.g. developers, executives, students)",
+        )
+        parser.add_argument(
+            "--tone",
+            type=str,
+            default="clear",
+            choices=["clear", "professional", "practical", "executive", "friendly", "formal"],
+            help="Writing tone (default: clear)",
+        )
+        parser.add_argument(
             "--keywords",
             type=str,
             default="",
@@ -54,6 +74,12 @@ class Command(BaseCommand):
             type=str,
             default="",
             help="Additional instructions for the agents",
+        )
+        parser.add_argument(
+            "--language",
+            type=str,
+            default="English",
+            help="Output language (default: English)",
         )
         parser.add_argument(
             "--quality-mode",
@@ -74,18 +100,27 @@ class Command(BaseCommand):
         topic = options["topic"].strip()
         title = options["title"].strip() or topic
         content_type = options["content_type"]
+        domain = options["domain"]
+        audience = options["audience"].strip()
+        tone = options["tone"]
         target_length = options["target_length"]
         keywords = [k.strip() for k in options["keywords"].split(",") if k.strip()]
         instructions = options["instructions"].strip()
+        language = options["language"].strip() or "English"
         quality_mode = options["quality_mode"] or getattr(settings, "PIPELINE_QUALITY_MODE", "standard")
         run_async = options["run_async"]
 
-        self.stdout.write(self.style.MIGRATE_HEADING("=== Content Pipeline ==="))
+        self.stdout.write(self.style.MIGRATE_HEADING("=== Domain LLM Assistant ==="))
         self.stdout.write(f"  Topic      : {topic}")
         self.stdout.write(f"  Type       : {content_type}")
+        self.stdout.write(f"  Domain     : {domain}")
+        self.stdout.write(f"  Audience   : {audience or 'general'}")
+        self.stdout.write(f"  Tone       : {tone}")
         self.stdout.write(f"  Quality    : {quality_mode}")
         self.stdout.write(f"  Length     : {target_length} words")
         self.stdout.write(f"  Keywords   : {keywords or 'none'}")
+        self.stdout.write(f"  Language   : {language}")
+        self.stdout.write("  Images     : auto-search enabled")
         self.stdout.write("")
 
         # Create job record
@@ -93,9 +128,13 @@ class Command(BaseCommand):
             title=title,
             topic=topic,
             content_type=content_type,
+            domain=domain,
+            audience=audience,
+            tone=tone,
             quality_mode=quality_mode,
             target_length=target_length,
             keywords=keywords,
+            language=language,
             additional_instructions=instructions,
         )
         self.stdout.write(f"  Job ID     : {job.id}")
@@ -132,15 +171,27 @@ class Command(BaseCommand):
 
         quality_mode = normalise_quality_mode(getattr(job, "quality_mode", "standard"))
         max_revisions, max_agent_retries = revision_limits(quality_mode)
+        lang = getattr(job, "language", "") or "English"
+        base_instructions = job.additional_instructions or ""
+        lang_prefix = (
+            f"Language: Write the entire article in {lang}.\n"
+            if lang and lang.lower() != "english"
+            else ""
+        )
+        combined_instructions = (lang_prefix + base_instructions).strip()
 
         state = PipelineState(
             job_id=str(job.id),
             topic=job.topic,
             content_type=job.content_type,
+            domain=getattr(job, "domain", "tech") or "tech",
+            audience=getattr(job, "audience", "") or "",
+            tone=getattr(job, "tone", "") or "",
             quality_mode=quality_mode,
             target_length=job.target_length,
             keywords=job.keywords or [],
-            additional_instructions=job.additional_instructions or "",
+            language=lang,
+            additional_instructions=combined_instructions,
             max_revisions=max_revisions,
             max_agent_retries=max_agent_retries,
         )

@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 from apps.pipeline.state import OutlineSection, PipelineState
 
 from .base import BaseAgent
-from .content_guides import get_content_type_guide
+from .content_guides import get_content_type_guide, get_outline_blueprint
+from .domain_guides import get_domain_guide_text
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 class SectionSchema(BaseModel):
     heading: str
     level: int = Field(default=1, ge=1, le=2)
+    template_role: str = Field(default="", description="The content template role this section fulfills")
     brief: str
     key_points: list[str] = Field(default_factory=list)
 
@@ -83,15 +85,22 @@ class OutlineAgent(BaseAgent):
         keywords_str = ", ".join(state.keywords) if state.keywords else "none specified"
         user_prompt = (
             f"Content type: {state.content_type.replace('_', ' ').title()}\n"
+            f"Domain: {state.domain}\n"
+            f"Audience: {state.audience or 'general'}\n"
+            f"Tone: {state.tone or 'clear'}\n"
             f"Topic: {state.topic}\n"
             f"Target word count: {state.target_length} words\n"
             f"Keywords: {keywords_str}\n"
             f"Target sections: {target_sections}\n\n"
             f"Content type guide:\n{content_type_guide}\n\n"
+            f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
+            f"Outline blueprint:\n{get_outline_blueprint(state.content_type, target_sections)}\n\n"
             f"Research summary:\n{state.research_summary}\n\n"
             f"Additional instructions: {state.additional_instructions or 'None'}\n\n"
-            f"Generate {target_sections} sections for the article body "
-            f"(exclude introduction and conclusion — those are separate)."
+            f"Generate exactly {target_sections} sections for the article body "
+            "(exclude introduction and conclusion - those are separate). "
+            "Each section must have a distinct template_role matching the blueprint, "
+            "so different content types produce visibly different structures."
         )
 
         result = self._call_llm(system_prompt, user_prompt, output_schema=OutlineSchema)
@@ -104,6 +113,7 @@ class OutlineAgent(BaseAgent):
                     level=s.level,
                     brief=s.brief,
                     key_points=s.key_points,
+                    template_role=s.template_role,
                 )
                 for s in result.sections
             ]
@@ -130,6 +140,7 @@ class OutlineAgent(BaseAgent):
                     level=s.get("level", 1),
                     brief=s.get("brief", ""),
                     key_points=s.get("key_points", []),
+                    template_role=s.get("template_role", ""),
                 )
                 for s in data
             ]

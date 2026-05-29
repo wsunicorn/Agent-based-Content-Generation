@@ -23,10 +23,15 @@ class PipelineGraphState(TypedDict, total=False):
     job_id: str
     topic: str
     content_type: str
+    domain: str
+    audience: str
+    tone: str
     quality_mode: str
     target_length: int
     keywords: list[str]
+    language: str
     additional_instructions: str
+    image_assets: list[dict[str, Any]]
     sources: list[dict[str, Any]]
     research_summary: str
     sections: list[dict[str, Any]]
@@ -84,6 +89,12 @@ def _agent_run_detail(agent: str, output: dict[str, Any]) -> dict[str, Any]:
             "sources_count": len(output.get("sources") or []),
             "summary_chars": len(output.get("research_summary") or ""),
         }
+    if agent == "image_research":
+        assets = output.get("image_assets") or []
+        return {
+            "image_assets_count": len(assets),
+            "providers": sorted({item.get("provider", "") for item in assets if item.get("provider")}),
+        }
     if agent == "outline":
         return {"sections_count": len(output.get("sections") or [])}
     if agent == "writer":
@@ -118,6 +129,7 @@ def _agent_run_detail(agent: str, output: dict[str, Any]) -> dict[str, Any]:
         report = output.get("qa_report") or {}
         return {
             "qa_score": report.get("overall_score", 0),
+            "format_adherence_score": report.get("format_adherence_score", 0),
             "passed": report.get("passed", False),
             "next_action": report.get("next_action", ""),
         }
@@ -286,6 +298,12 @@ def _send_writer_tasks(state: dict[str, Any]) -> list[Send]:
     return sends
 
 
+def _route_after_coordinator(state: dict[str, Any]) -> str:
+    if state.get("outline_approved") and state.get("sections"):
+        return "writer"
+    return "image_research"
+
+
 def _route_after_coordinator_router(state: dict[str, Any]) -> str:
     if state.get("completed") or state.get("next_action") == "fail_with_warning":
         return END
@@ -306,6 +324,7 @@ def build_pipeline_graph() -> StateGraph:
     from apps.agents.coordinator import CoordinatorAgent
     from apps.agents.editor import EditorAgent
     from apps.agents.fact_checker import FactCheckerAgent
+    from apps.agents.image_research import ImageResearchAgent
     from apps.agents.outline import OutlineAgent
     from apps.agents.qa import QAAgent
     from apps.agents.research import ResearchAgent
@@ -315,6 +334,7 @@ def build_pipeline_graph() -> StateGraph:
     graph = StateGraph(PipelineGraphState)
 
     graph.add_node("coordinator", _make_node(CoordinatorAgent))
+    graph.add_node("image_research", _make_node(ImageResearchAgent))
     graph.add_node("research", _make_node(ResearchAgent))
     graph.add_node("outline", _make_node(OutlineAgent))
     graph.add_node("writer", _make_node(WriterAgent))
@@ -327,7 +347,15 @@ def build_pipeline_graph() -> StateGraph:
     graph.add_node("qa", _make_node(QAAgent))
 
     graph.set_entry_point("coordinator")
-    graph.add_edge("coordinator", "research")
+    graph.add_conditional_edges(
+        "coordinator",
+        _route_after_coordinator,
+        {
+            "image_research": "image_research",
+            "writer": "writer",
+        },
+    )
+    graph.add_edge("image_research", "research")
     graph.add_edge("research", "outline")
     graph.add_edge("outline", "writer")
     graph.add_conditional_edges("writer", _send_writer_tasks, ["section_writer", "join_draft"])

@@ -11,6 +11,7 @@ from apps.pipeline.quality import is_strict_fact_check, normalise_quality_mode
 from apps.pipeline.state import PipelineState
 
 from .base import BaseAgent
+from .domain_guides import get_domain_guide_text
 
 logger = logging.getLogger(__name__)
 
@@ -132,12 +133,14 @@ class FactCheckerAgent(BaseAgent):
             "dates, studies, reports, attributions, product/company claims. "
             "Ignore advice, opinions, generic tips, style suggestions, and common "
             "sense statements. "
+            "Pay special attention to domain cautions and forbidden claims. "
             f"Return at most {max_claims} claims."
         )
 
         snippet = text[:1800]
         user_prompt = (
             f"Content type: {state.content_type}\n"
+            f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Quality mode: {state.quality_mode}\n\n"
             f"Article text:\n{snippet}\n\n"
             f"Extract up to {max_claims} hard factual claims."

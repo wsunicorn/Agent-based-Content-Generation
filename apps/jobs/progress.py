@@ -15,6 +15,7 @@ SNAPSHOT_LIMIT = 4000
 AGENT_TYPE_MAP = {
     "coordinator": "coordinator",
     "coordinator_router": "coordinator_router",
+    "image_research": "image_research",
     "research": "research",
     "outline": "outline",
     "writer": "writer",

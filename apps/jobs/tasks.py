@@ -70,6 +70,64 @@ def push_error(job_id: str, message: str) -> None:
         logger.debug("WebSocket push failed (non-critical): %s", exc)
 
 
+def _initial_state_from_job(job):
+    from apps.pipeline.quality import normalise_quality_mode, revision_limits
+    from apps.pipeline.state import PipelineState
+
+    lang = getattr(job, "language", "") or "English"
+    base_instructions = job.additional_instructions or ""
+    lang_prefix = (
+        f"Language: Write the entire article in {lang}.\n"
+        if lang and lang.lower() != "english"
+        else ""
+    )
+    combined_instructions = (lang_prefix + base_instructions).strip()
+    quality_mode = normalise_quality_mode(getattr(job, "quality_mode", "standard"))
+    max_revisions, max_agent_retries = revision_limits(quality_mode)
+
+    return PipelineState(
+        job_id=str(job.id),
+        topic=job.topic,
+        content_type=job.content_type,
+        domain=getattr(job, "domain", "tech") or "tech",
+        audience=getattr(job, "audience", "") or "",
+        tone=getattr(job, "tone", "") or "",
+        quality_mode=quality_mode,
+        target_length=job.target_length,
+        keywords=job.keywords or [],
+        language=lang,
+        additional_instructions=combined_instructions,
+        max_revisions=max_revisions,
+        max_agent_retries=max_agent_retries,
+    )
+
+
+def _outline_sections_from_payload(payload):
+    from apps.pipeline.state import OutlineSection
+
+    sections = []
+    for item in payload or []:
+        if not isinstance(item, dict):
+            continue
+        heading = str(item.get("heading") or "").strip()
+        brief = str(item.get("brief") or "").strip()
+        if not heading:
+            continue
+        key_points = item.get("key_points") or []
+        if isinstance(key_points, str):
+            key_points = [line.strip("- ").strip() for line in key_points.splitlines()]
+        sections.append(
+            OutlineSection(
+                heading=heading[:180],
+                level=int(item.get("level") or 1),
+                brief=brief[:1000],
+                key_points=[str(point).strip() for point in key_points if str(point).strip()][:8],
+                template_role=str(item.get("template_role") or "").strip()[:120],
+            )
+        )
+    return sections
+
+
 # ---------------------------------------------------------------------------
 # Main pipeline task
 # ---------------------------------------------------------------------------
@@ -89,9 +147,18 @@ def run_pipeline(self, job_id: str):
         return {"error": "Job not found"}
 
     # Mark job as running
+    resume_from_outline = bool(
+        job.pipeline_state
+        and job.outline_approved_at
+        and getattr(job, "approved_outline", None)
+    )
+
     job.status = Job.Status.RUNNING
-    job.started_at = dj_timezone.now()
-    job.save(update_fields=["status", "started_at"])
+    update_fields = ["status"]
+    if not job.started_at:
+        job.started_at = dj_timezone.now()
+        update_fields.append("started_at")
+    job.save(update_fields=update_fields)
 
     # Build initial state — combine language preference into additional_instructions
     lang = getattr(job, "language", "") or "English"
@@ -105,13 +172,24 @@ def run_pipeline(self, job_id: str):
         job_id=str(job.id),
         topic=job.topic,
         content_type=job.content_type,
+        domain=getattr(job, "domain", "tech") or "tech",
+        audience=getattr(job, "audience", "") or "",
+        tone=getattr(job, "tone", "") or "",
         quality_mode=quality_mode,
         target_length=job.target_length,
         keywords=job.keywords or [],
+        language=lang,
         additional_instructions=combined_instructions,
         max_revisions=max_revisions,
         max_agent_retries=max_agent_retries,
     )
+    if resume_from_outline:
+        state = PipelineState.from_dict(job.pipeline_state)
+        state.job_id = str(job.id)
+        state.sections = _outline_sections_from_payload(job.approved_outline)
+        state.outline_approved = True
+        state.completed = False
+        state.error = None
 
     try:
         graph = get_pipeline_graph()
@@ -138,6 +216,16 @@ def run_pipeline(self, job_id: str):
                             for s in raw_sources[:6]
                             if isinstance(s, dict)
                         ],
+                    }
+                elif node_name == "image_research":
+                    image_assets = node_output.get("image_assets", []) or []
+                    detail = {
+                        "image_assets_count": len(image_assets),
+                        "providers": sorted({
+                            item.get("provider", "")
+                            for item in image_assets
+                            if isinstance(item, dict) and item.get("provider")
+                        }),
                     }
                 elif node_name == "outline":
                     sections = node_output.get("sections", [])
@@ -185,10 +273,32 @@ def run_pipeline(self, job_id: str):
                     if isinstance(qa, dict):
                         detail = {
                             "qa_score": qa.get("overall_score", 0),
+                            "format_adherence_score": qa.get("format_adherence_score", 0),
                             "next_action": qa.get("next_action", ""),
                         }
                 push_progress(job_id, node_name, "completed", detail or None)
                 logger.info("Node completed: %s (job=%s)", node_name, job_id)
+                if (
+                    node_name == "outline"
+                    and job.outline_review_required
+                    and not resume_from_outline
+                ):
+                    paused_state = PipelineState.from_dict(final_state)
+                    job.pipeline_state = dataclasses.asdict(paused_state)
+                    job.status = Job.Status.PAUSED
+                    job.save(update_fields=["pipeline_state", "status"])
+                    _save_outline_checkpoint_artifacts(job, paused_state)
+                    push_progress(
+                        job_id,
+                        "outline_review",
+                        "paused",
+                        {
+                            "sections_count": len(paused_state.sections),
+                            "message": "Outline ready for approval.",
+                        },
+                    )
+                    logger.info("Job %s paused for outline review", job_id)
+                    return {"status": "paused", "job_id": job_id}
 
         # Reconstruct PipelineState from final dict
         state = PipelineState.from_dict(final_state)
@@ -204,10 +314,11 @@ def run_pipeline(self, job_id: str):
         job.llm_calls_count = state.llm_calls_total
         job.llm_tokens_used = state.llm_tokens_total
         job.llm_usage_by_provider = _build_llm_usage_by_provider(state)
+        job.pipeline_state = dataclasses.asdict(state)
         job.error_message = ""
         job.save(update_fields=[
             "status", "completed_at", "llm_calls_count",
-            "llm_tokens_used", "llm_usage_by_provider", "error_message",
+            "llm_tokens_used", "llm_usage_by_provider", "pipeline_state", "error_message",
         ])
 
         push_completed(job_id, qa_score)
@@ -243,10 +354,88 @@ def run_pipeline(self, job_id: str):
 # Helper: persist pipeline outputs as Artifact records
 # ---------------------------------------------------------------------------
 
+def _next_artifact_version(job, artifact_type):
+    from apps.jobs.models import Artifact
+
+    latest = (
+        Artifact.objects.filter(job=job, artifact_type=artifact_type)
+        .order_by("-version")
+        .values_list("version", flat=True)
+        .first()
+    )
+    return int(latest or 0) + 1
+
+
+def _save_outline_checkpoint_artifacts(job, state):
+    from apps.jobs.models import Artifact
+
+    artifacts_to_create = []
+
+    if state.image_assets:
+        artifact_type = Artifact.ArtifactType.IMAGE_ASSETS
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=artifact_type,
+                content_json={"image_assets": [dataclasses.asdict(item) for item in state.image_assets]},
+                version=_next_artifact_version(job, artifact_type),
+            )
+        )
+
+    if state.research_summary:
+        artifact_type = Artifact.ArtifactType.RESEARCH_SUMMARY
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=artifact_type,
+                content_text=state.research_summary,
+                content_json={"sources": [dataclasses.asdict(s) for s in state.sources]},
+                word_count=len(state.research_summary.split()),
+                version=_next_artifact_version(job, artifact_type),
+            )
+        )
+
+    if state.sources:
+        artifact_type = Artifact.ArtifactType.SOURCE_DOCUMENTS
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=artifact_type,
+                content_json={"sources": [dataclasses.asdict(s) for s in state.sources]},
+                word_count=sum(len(s.content.split()) for s in state.sources),
+                version=_next_artifact_version(job, artifact_type),
+            )
+        )
+
+    if state.sections:
+        artifact_type = Artifact.ArtifactType.OUTLINE
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=artifact_type,
+                content_json={"sections": [dataclasses.asdict(s) for s in state.sections]},
+                version=_next_artifact_version(job, artifact_type),
+            )
+        )
+
+    if artifacts_to_create:
+        Artifact.objects.bulk_create(artifacts_to_create)
+
+
 def _save_artifacts(job, state):
     from apps.jobs.models import Artifact
 
     artifacts_to_create = []
+
+    if state.image_assets:
+        artifacts_to_create.append(
+            Artifact(
+                job=job,
+                artifact_type=Artifact.ArtifactType.IMAGE_ASSETS,
+                content_json={"image_assets": [dataclasses.asdict(item) for item in state.image_assets]},
+                word_count=0,
+            )
+        )
 
     if state.research_summary:
         artifacts_to_create.append(

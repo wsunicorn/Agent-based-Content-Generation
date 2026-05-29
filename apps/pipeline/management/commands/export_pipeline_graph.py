@@ -79,21 +79,23 @@ def _draw_static_svg() -> str:
     nodes = {
         "__start__": (60, 80, "START"),
         "coordinator": (210, 80, "Coordinator"),
-        "research": (360, 80, "Research"),
-        "outline": (510, 80, "Outline"),
-        "writer": (660, 80, "Writer Plan"),
-        "section_writer": (810, 80, "Section Writers"),
-        "join_draft": (970, 80, "Join Draft"),
-        "editor": (1120, 80, "Editor"),
-        "coordinator_router": (1270, 80, "Router"),
-        "fact_checker": (1030, 230, "Fact Check"),
-        "seo": (1190, 230, "SEO"),
-        "qa": (1350, 230, "QA"),
-        "__end__": (1510, 80, "END"),
+        "image_research": (360, 80, "Image Search"),
+        "research": (520, 80, "Research"),
+        "outline": (670, 80, "Outline"),
+        "writer": (820, 80, "Writer Plan"),
+        "section_writer": (970, 80, "Section Writers"),
+        "join_draft": (1130, 80, "Join Draft"),
+        "editor": (1280, 80, "Editor"),
+        "coordinator_router": (1430, 80, "Router"),
+        "fact_checker": (1190, 230, "Fact Check"),
+        "seo": (1350, 230, "SEO"),
+        "qa": (1510, 230, "QA"),
+        "__end__": (1670, 80, "END"),
     }
     solid_edges = [
         ("__start__", "coordinator"),
-        ("coordinator", "research"),
+        ("coordinator", "image_research"),
+        ("image_research", "research"),
         ("research", "outline"),
         ("outline", "writer"),
         ("section_writer", "join_draft"),
@@ -136,7 +138,7 @@ def _draw_static_svg() -> str:
         )
 
     parts = [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420">',
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="420" viewBox="0 0 1760 420">',
         "<defs>",
         '<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">',
         '<path d="M 0 0 L 10 5 L 0 10 z" fill="#536170" />',
@@ -145,8 +147,8 @@ def _draw_static_svg() -> str:
         "<style>",
         ".bg{fill:#f8fafc}.node{fill:#eef2ff;stroke:#6875f5;stroke-width:1.4}.terminal{fill:#ecfeff;stroke:#0891b2}.router{fill:#fff7ed;stroke:#ea580c}.edge{fill:none;stroke:#536170;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.dashed{stroke:#748294;stroke-dasharray:7 6}.label{font:600 14px Arial,sans-serif;fill:#111827;text-anchor:middle;dominant-baseline:middle}.hint{font:12px Arial,sans-serif;fill:#64748b;text-anchor:middle}",
         "</style>",
-        '<rect class="bg" width="1600" height="420" rx="18"/>',
-        '<text x="800" y="28" class="hint">Solid lines are normal flow. Dashed lines are conditional router branches / fan-out.</text>',
+        '<rect class="bg" width="1760" height="420" rx="18"/>',
+        '<text x="880" y="28" class="hint">Solid lines are normal flow. Dashed lines are conditional router branches / fan-out.</text>',
     ]
     parts.extend(edge(s, t) for s, t in solid_edges)
     parts.extend(edge(s, t, dashed=True) for s, t in dashed_edges)

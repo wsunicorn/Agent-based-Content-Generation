@@ -37,14 +37,6 @@ def _parse_env_mapping(value: str) -> dict[str, str]:
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
-APP_BASIC_AUTH_ENABLED = env.bool("APP_BASIC_AUTH_ENABLED", default=False)
-APP_BASIC_AUTH_USERNAME = env("APP_BASIC_AUTH_USERNAME", default="admin")
-APP_BASIC_AUTH_PASSWORD = env("APP_BASIC_AUTH_PASSWORD", default="")
-APP_BASIC_AUTH_EXEMPT_PATHS = env.list(
-    "APP_BASIC_AUTH_EXEMPT_PATHS",
-    default=["/api/health/", "/static/", "/media/"],
-)
 
 # ---------------------------------------------------------------------------
 # Applications
@@ -169,21 +161,11 @@ REST_FRAMEWORK = {
 # ---------------------------------------------------------------------------
 # Django Channels (WebSocket)
 # ---------------------------------------------------------------------------
-REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
-CACHE_URL = env("CACHE_URL", default=env("REDIS_CACHE_URL", default="redis://localhost:6379/1"))
-
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": CACHE_URL,
-    }
-}
-
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [REDIS_URL],
+            "hosts": [env("REDIS_URL", default="redis://localhost:6379/0")],
         },
     },
 }
@@ -197,7 +179,7 @@ if env.bool("USE_INMEMORY_CHANNEL_LAYER", default=False):
 # ---------------------------------------------------------------------------
 # Celery
 # ---------------------------------------------------------------------------
-CELERY_BROKER_URL = REDIS_URL
+CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_CACHE_BACKEND = "django-cache"
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -245,14 +227,12 @@ OLLAMA_FAST_MODEL = env("OLLAMA_FAST_MODEL", default="qwen2.5:3b")
 OLLAMA_REASONING_MODEL = env("OLLAMA_REASONING_MODEL", default="qwen3:8b")
 OLLAMA_STRUCTURED_MODEL = env("OLLAMA_STRUCTURED_MODEL", default="qwen2.5:7b")
 OLLAMA_EMBED_MODEL = env("OLLAMA_EMBED_MODEL", default="nomic-embed-text-v2-moe")
-OLLAMA_VISION_MODEL = env("OLLAMA_VISION_MODEL", default="gemma3:4b")
 OLLAMA_REQUIRED_MODELS = env.list(
     "OLLAMA_REQUIRED_MODELS",
     default=[
         "qwen2.5:7b",
         "qwen3:8b",
         "nomic-embed-text-v2-moe",
-        "gemma3:4b",
     ],
 )
 MAX_PARALLEL_WRITERS = env.int("MAX_PARALLEL_WRITERS", default=2)
@@ -269,6 +249,13 @@ FAST_MODE_LLM_SEO = env.bool("FAST_MODE_LLM_SEO", default=True)
 RESEARCH_MAX_SOURCES = env.int("RESEARCH_MAX_SOURCES", default=4)
 RESEARCH_CACHE_TTL = env.int("RESEARCH_CACHE_TTL", default=86400)
 SCRAPE_CACHE_TTL = env.int("SCRAPE_CACHE_TTL", default=604800)
+IMAGE_SEARCH_ENABLED = env.bool("IMAGE_SEARCH_ENABLED", default=True)
+IMAGE_SEARCH_PROVIDER = env("IMAGE_SEARCH_PROVIDER", default="wikimedia_commons").lower()
+IMAGE_SEARCH_MAX_RESULTS = env.int("IMAGE_SEARCH_MAX_RESULTS", default=2)
+IMAGE_SEARCH_USER_AGENT = env(
+    "IMAGE_SEARCH_USER_AGENT",
+    default="DomainLLMAssistant/1.0 (local development)",
+)
 OPENAI_COMPATIBLE_BASE_URL = env(
     "OPENAI_COMPATIBLE_BASE_URL",
     default="http://localhost:1234/v1",

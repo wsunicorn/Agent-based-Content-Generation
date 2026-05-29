@@ -58,7 +58,6 @@ class Command(BaseCommand):
             "OLLAMA_REASONING_MODEL",
             "OLLAMA_STRUCTURED_MODEL",
             "OLLAMA_EMBED_MODEL",
-            "OLLAMA_VISION_MODEL",
         ):
             model = getattr(settings, name, "")
             if model:

@@ -13,6 +13,7 @@ from apps.pipeline.quality import normalise_quality_mode, revision_limits, shoul
 from apps.pipeline.state import PipelineState
 
 from .base import BaseAgent
+from .domain_guides import normalise_domain
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ class CoordinatorAgent(BaseAgent):
 
         if state.content_type not in VALID_CONTENT_TYPES:
             state.content_type = "blog_post"
+        state.domain = normalise_domain(state.domain)
+        state.audience = (state.audience or "").strip()[:120]
+        state.tone = (state.tone or "clear").strip().lower()[:30]
 
         state.quality_mode = normalise_quality_mode(state.quality_mode)
         state.max_revisions, state.max_agent_retries = revision_limits(state.quality_mode)
@@ -40,7 +44,8 @@ class CoordinatorAgent(BaseAgent):
         state.keywords = [kw.strip() for kw in state.keywords if kw.strip()][:10]
 
         logger.info(
-            "[CoordinatorAgent] Pipeline configured - type=%s, target=%d words, keywords=%s",
+            "[CoordinatorAgent] Pipeline configured - domain=%s type=%s, target=%d words, keywords=%s",
+            state.domain,
             state.content_type,
             state.target_length,
             state.keywords,

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Content Pipeline</title>
+  <title>Domain LLM Assistant</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -610,6 +610,48 @@
     }
     .source-chip:hover { background: rgba(124,108,248,.22); }
 
+    .timeline-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+    .timeline-item {
+      display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; align-items: center;
+      padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--surface-2); font-size: .75rem;
+    }
+    .timeline-agent { color: var(--text); font-weight: 700; }
+    .timeline-detail { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .timeline-time { color: var(--text-3); font-family: 'JetBrains Mono', monospace; font-size: .68rem; }
+    .mini-panel {
+      margin-top: 14px; padding: 14px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: rgba(255,255,255,.03);
+    }
+    .mini-panel-title {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2);
+    }
+    .outline-section {
+      display: grid; gap: 8px; padding: 10px; margin-bottom: 8px;
+      border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2);
+    }
+    .outline-section input, .outline-section textarea {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 8px 10px; font-family: inherit; font-size: .78rem;
+    }
+    .outline-section textarea { min-height: 58px; resize: vertical; }
+    .evidence-list { display: grid; gap: 8px; }
+    .evidence-item {
+      display: grid; gap: 3px; padding: 9px 10px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--surface-2); font-size: .75rem;
+    }
+    .evidence-title { color: var(--text); font-weight: 700; }
+    .evidence-url { color: var(--accent-4); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .health-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 14px; }
+    .health-box {
+      padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface-2); text-align: center;
+    }
+    .health-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; background: var(--text-3); }
+    .health-dot.ok { background: var(--green); box-shadow: 0 0 0 4px rgba(34,211,164,.12); }
+    .health-dot.bad { background: var(--red); box-shadow: 0 0 0 4px rgba(242,93,93,.12); }
+
     [data-theme="light"] .modal-box { background: #fff; }
     [data-theme="light"] {
       --bg:       #f5f6fb;
@@ -679,8 +721,8 @@
 <nav class="topbar">
   <div class="logo-icon">🤖</div>
   <div>
-    <div class="nav-title">AI Content Pipeline</div>
-    <div class="nav-sub">Multi-agent · Ollama local · LangGraph</div>
+    <div class="nav-title">Domain LLM Assistant</div>
+    <div class="nav-sub">Domain-guided multi-agent writing · Ollama local · LangGraph</div>
   </div>
   <div class="nav-actions">
     <span id="ws-indicator" class="status-pill pill-idle text-sm">Idle</span>
@@ -692,14 +734,14 @@
 <div class="app-wrapper">
 
   <!-- ══════════════ Section 1 — New Job + Pipeline ══════════════ -->
-  <div class="section-label">① Generate Content</div>
+  <div class="section-label">① Generate Domain Content</div>
   <div class="top-row">
 
     <!-- Form -->
     <div class="card">
       <div class="card-head">
         <div class="card-head-icon icon-teal">✦</div>
-        <span class="card-head-title">New Job</span>
+        <span class="card-head-title">New Domain Job</span>
       </div>
       <div class="card-body">
         <form id="job-form">
@@ -745,6 +787,36 @@
               </select>
             </div>
             <div class="form-group" style="margin-bottom:0">
+              <label class="field-label" for="domain">Domain</label>
+              <select class="field-select" id="domain">
+                <option value="tech">Tech</option>
+                <option value="marketing">Marketing</option>
+                <option value="education">Education</option>
+                <option value="finance">Finance</option>
+                <option value="healthcare">Healthcare</option>
+                <option value="legal">Legal</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:14px;">
+            <div class="form-group" style="margin-bottom:0">
+              <label class="field-label" for="audience">Audience</label>
+              <input class="field-input" id="audience" type="text" placeholder="e.g. founders, developers, students">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="field-label" for="tone">Tone</label>
+              <select class="field-select" id="tone">
+                <option value="clear">Clear</option>
+                <option value="professional">Professional</option>
+                <option value="practical">Practical</option>
+                <option value="executive">Executive</option>
+                <option value="friendly">Friendly</option>
+                <option value="formal">Formal</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:14px;">
+            <div class="form-group" style="margin-bottom:0">
               <label class="field-label" for="quality_mode">Quality Mode</label>
               <select class="field-select" id="quality_mode">
                 <option value="standard">Standard</option>
@@ -752,15 +824,17 @@
                 <option value="strict">Strict</option>
               </select>
             </div>
-          </div>
-          <div class="form-row" style="margin-top:14px;">
             <div class="form-group" style="margin-bottom:0">
               <label class="field-label" for="keywords">Keywords <span class="text-dim">(comma-sep.)</span></label>
               <input class="field-input" id="keywords" type="text" placeholder="AI, machine learning, 2025">
             </div>
           </div>
+          <label class="field-label mt-3" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input id="outline_review_required" type="checkbox" checked>
+            Review/edit outline before writing
+          </label>
           <button type="submit" id="submit-btn" class="btn btn-primary mt-2">
-            <span id="btn-text">⚡ Generate Content</span>
+            <span id="btn-text">⚡ Generate Domain Content</span>
           </button>
         </form>
       </div>
@@ -780,6 +854,19 @@
         <div class="pipeline-track" id="pipeline-track"></div>
         <div class="progress-wrap">
           <div id="progress-fill" class="progress-fill animated" style="width:0%"></div>
+        </div>
+        <div class="timeline-list" id="agent-timeline"></div>
+        <div class="mini-panel d-none" id="outline-review-panel">
+          <div class="mini-panel-title">Outline Review</div>
+          <div id="outline-editor"></div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-save btn-sm" onclick="approveOutline()">Approve &amp; continue</button>
+            <span id="outline-review-status" class="text-dim text-sm"></span>
+          </div>
+        </div>
+        <div class="mini-panel d-none" id="evidence-panel">
+          <div class="mini-panel-title">Sources &amp; Evidence</div>
+          <div class="evidence-list" id="evidence-list"></div>
         </div>
         <div class="terminal" id="terminal">
           <div class="log-line">
@@ -896,6 +983,12 @@
         </div>
       </div>
 
+      <div class="health-grid">
+        <div class="health-box"><span id="health-db-dot" class="health-dot"></span><span class="kpi-label">DB</span><div class="kpi-sub" id="health-db">checking</div></div>
+        <div class="health-box"><span id="health-redis-dot" class="health-dot"></span><span class="kpi-label">Redis</span><div class="kpi-sub" id="health-redis">checking</div></div>
+        <div class="health-box"><span id="health-worker-dot" class="health-dot"></span><span class="kpi-label">Worker</span><div class="kpi-sub" id="health-worker">checking</div></div>
+      </div>
+
       <div class="divider"></div>
       <div style="font-size:.7rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Recent QA Scores</div>
       <div class="chart-bar-wrap" id="qa-chart">
@@ -917,6 +1010,7 @@
         <thead>
           <tr>
             <th>Topic</th>
+            <th>Domain</th>
             <th>Type</th>
             <th>Lang</th>
             <th>Status</th>
@@ -928,7 +1022,7 @@
         </thead>
         <tbody id="jobs-table-body">
           <tr>
-            <td colspan="8" style="text-align:center;padding:36px;color:var(--text-3);">
+            <td colspan="9" style="text-align:center;padding:36px;color:var(--text-3);">
               No jobs yet
             </td>
           </tr>
@@ -959,8 +1053,10 @@
 ───────────────────────────────────────────────────────────────────────── */
 const AGENTS = [
   { id:'coordinator', icon:'🎯', label:'Coord'   },
+  { id:'image_research', icon:'🖼', label:'Images' },
   { id:'research',    icon:'🔍', label:'Research' },
   { id:'outline',     icon:'📐', label:'Outline'  },
+  { id:'outline_review', icon:'✋', label:'Review' },
   { id:'writer',      icon:'🧭', label:'Plan'     },
   { id:'section_writer', icon:'✍️', label:'Sections' },
   { id:'join_draft',  icon:'🧩', label:'Join'     },
@@ -976,6 +1072,7 @@ let ws = null;
 let activeJobId = null;
 let pollTimer = null;
 let seenRunLogKeys = new Set();
+let currentOutlineSections = [];
 
 /* ─────────────────────────────────────────────────────────────────────
    Pipeline track
@@ -1013,33 +1110,36 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
 
   const keywords = document.getElementById('keywords').value
     .split(',').map(k => k.trim()).filter(Boolean);
-
   try {
     const resp = await fetch('/api/jobs/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+        ...csrfHeaders(),
       },
       body: JSON.stringify({
         title:                  document.getElementById('topic').value,
         topic:                  document.getElementById('topic').value,
         content_type:           document.getElementById('content_type').value,
+        domain:                 document.getElementById('domain').value,
+        audience:               document.getElementById('audience').value,
+        tone:                   document.getElementById('tone').value,
         quality_mode:           document.getElementById('quality_mode').value,
         target_length:          parseInt(document.getElementById('target_length').value),
         keywords,
         language:               document.getElementById('language').value,
         additional_instructions: document.getElementById('additional_instructions').value,
+        outline_review_required: document.getElementById('outline_review_required').checked,
       }),
     });
-    btn.disabled = false; btnText.textContent = '⚡ Generate Content';
+    btn.disabled = false; btnText.textContent = '⚡ Generate Domain Content';
     if (!resp.ok) { const e = await resp.json().catch(()=>({})); tlog('Error: '+JSON.stringify(e),'error'); return; }
     const job = await resp.json();
     activeJobId = job.id;
     startTracking(job);
     loadJobs();
   } catch (err) {
-    btn.disabled = false; btnText.textContent = '⚡ Generate Content';
+    btn.disabled = false; btnText.textContent = '⚡ Generate Domain Content';
     tlog('Network error: ' + err.message, 'error');
   }
 });
@@ -1067,12 +1167,24 @@ function handleWsMessage(data, jobId) {
   if (data.type === 'progress') {
     const idx = AGENT_IDS.indexOf(data.agent);
     const status = data.status || 'completed';
+    if (status === 'paused') {
+      markNodeDone('outline', AGENT_IDS.indexOf('outline'));
+      markNodeActive('outline_review');
+      setStatusBadge('pending');
+      addTimeline(data.agent, 'paused', data.detail || {});
+      tlog('[outline] Ready for review', 'accent');
+      loadEvidence(jobId);
+      loadOutlineForReview(jobId, true);
+      loadJobs();
+      return;
+    }
     if (status === 'running') {
       markNodeActive(data.agent);
       setProgress(Math.max(4, Math.round((Math.max(idx, 0)/AGENTS.length)*100)));
       setStatusBadge('running');
       const detail = data.detail || {};
       const label = detail.heading ? ' - ' + detail.heading : '';
+      addTimeline(data.agent, 'running', detail);
       tlog('[' + data.agent + '] running' + label, 'accent');
       loadJobs();
       return;
@@ -1083,13 +1195,18 @@ function handleWsMessage(data, jobId) {
     setStatusBadge('running');
     // Build rich log message
     const detail = data.detail || {};
-    if (data.agent === 'research' && detail.sources_count !== undefined) {
+    addTimeline(data.agent, 'completed', detail);
+    if (data.agent === 'image_research' && detail.image_assets_count !== undefined) {
+      const providers = (detail.providers || []).join(', ') || 'image search';
+      tlog('[images] Completed — ' + detail.image_assets_count + ' image(s) selected via ' + providers, 'success');
+    } else if (data.agent === 'research' && detail.sources_count !== undefined) {
       tlog('[research] Completed — found ' + detail.sources_count + ' source(s)', 'success');
       (detail.sources || []).forEach(s => {
         const el = document.getElementById('terminal');
         const chip = document.createElement('div');
         chip.className = 'log-line';
-        const host = s.url ? new URL(s.url).hostname.replace('www.','') : s.title;
+        let host = s.title || 'source';
+        try { if (s.url) host = new URL(s.url, window.location.origin).hostname.replace('www.',''); } catch {}
         chip.innerHTML = '<span class="log-time">      </span>'
           + '<a href="'+esc(s.url)+'" target="_blank" rel="noopener" class="source-chip">🔗 '+esc(s.title||host)+'</a>';
         el.appendChild(chip);
@@ -1097,6 +1214,7 @@ function handleWsMessage(data, jobId) {
       });
     } else if (data.agent === 'outline' && detail.sections_count !== undefined) {
       tlog('[outline] Completed — ' + detail.sections_count + ' section(s) planned', 'success');
+      loadEvidence(jobId);
     } else if (data.agent === 'writer' && detail.tasks_count !== undefined) {
       tlog('[writer] Planned ' + detail.tasks_count + ' section writer task(s)', 'success');
     } else if (data.agent === 'section_writer' && detail.word_count !== undefined) {
@@ -1111,7 +1229,8 @@ function handleWsMessage(data, jobId) {
       tlog('[router] ' + (detail.next_action || 'approve') + target, 'accent');
       (detail.issues || []).forEach(issue => tlog('[router] ' + issue, 'info'));
     } else if (data.agent === 'qa' && detail.qa_score !== undefined) {
-      tlog('[qa] Completed — score: ' + detail.qa_score + '/100', 'success');
+      const format = detail.format_adherence_score !== undefined ? ' · format ' + detail.format_adherence_score + '/15' : '';
+      tlog('[qa] Completed — score: ' + detail.qa_score + '/100' + format, 'success');
     } else {
       tlog('[' + data.agent + '] completed', 'success');
     }
@@ -1122,7 +1241,7 @@ function handleWsMessage(data, jobId) {
     setStatusBadge('done'); stopProgressAnimation();
     tlog('Pipeline complete — QA: ' + data.qa_score + '/100', 'success');
     clearInterval(pollTimer); setWsIndicator('done');
-    loadJobs(); fetchAndShowResult(jobId, data.qa_score);
+    loadJobs(); loadEvidence(jobId); loadOutlineForReview(jobId, false); fetchAndShowResult(jobId, data.qa_score);
   } else if (data.type === 'error') {
     setStatusBadge('failed'); setWsIndicator('failed');
     tlog('ERROR: ' + data.message, 'error');
@@ -1148,8 +1267,16 @@ async function pollJobStatus(jobId) {
         AGENT_IDS.forEach(id => markNodeDone(id, AGENT_IDS.indexOf(id)));
         setStatusBadge('done'); stopProgressAnimation();
         tlog('Completed (polling)', 'success');
+        loadEvidence(jobId);
+        loadOutlineForReview(jobId, false);
         fetchAndShowResult(jobId, null);
       }
+    } else if (job.status === 'paused') {
+      setStatusBadge('pending');
+      markNodeDone('outline', AGENT_IDS.indexOf('outline'));
+      markNodeActive('outline_review');
+      loadEvidence(jobId);
+      loadOutlineForReview(jobId, true);
     } else if (job.status === 'failed' || job.status === 'cancelled') {
       clearInterval(pollTimer); setStatusBadge('failed'); tlog('Job ' + job.status, 'error');
     }
@@ -1225,6 +1352,105 @@ async function fetchAndShowResult(jobId, qaScore) {
 /* ─────────────────────────────────────────────────────────────────────
    Pipeline UI helpers
 ───────────────────────────────────────────────────────────────────────── */
+async function loadEvidence(jobId) {
+  if (!jobId) return;
+  try {
+    const resp = await fetch('/api/jobs/' + jobId + '/evidence/');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (Array.isArray(data.outline) && data.outline.length && !currentOutlineSections.length) {
+      renderOutlineEditor(data.outline, false);
+    }
+    const sources = (data.sources || []).filter(s => s.source_type !== 'image').slice(0, 8);
+    const images = (data.images || []).slice(0, 4);
+    const rows = [];
+    sources.forEach(s => rows.push('<div class="evidence-item"><div class="evidence-title">' + esc(s.title || 'Source') + '</div><a class="evidence-url" href="' + esc(s.url || '#') + '" target="_blank">' + esc(s.url || '') + '</a></div>'));
+    images.forEach(img => rows.push('<div class="evidence-item"><div class="evidence-title">' + esc(img.title || img.caption || 'Image') + '</div><a class="evidence-url" href="' + esc(img.source_url || img.url || '#') + '" target="_blank">' + esc(img.provider || 'image source') + '</a></div>'));
+    if (rows.length) {
+      document.getElementById('evidence-list').innerHTML = rows.join('');
+      document.getElementById('evidence-panel').classList.remove('d-none');
+    }
+  } catch {}
+}
+
+async function loadOutlineForReview(jobId, editable) {
+  if (!jobId) return;
+  try {
+    const resp = await fetch('/api/jobs/' + jobId + '/evidence/');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (Array.isArray(data.outline) && data.outline.length) renderOutlineEditor(data.outline, editable);
+  } catch {}
+}
+
+function renderOutlineEditor(sections, editable) {
+  currentOutlineSections = sections || [];
+  const panel = document.getElementById('outline-review-panel');
+  const approveBtn = panel.querySelector('button');
+  approveBtn.style.display = editable ? '' : 'none';
+  document.getElementById('outline-editor').innerHTML = currentOutlineSections.map((section, idx) => {
+    const disabled = editable ? '' : ' disabled';
+    const points = (section.key_points || []).join('\n');
+    const regen = activeJobId && !editable ? '<button class="btn btn-ghost btn-sm" onclick="regenerateSection(' + (idx + 1) + ')">Regenerate section</button>' : '';
+    return '<div class="outline-section" data-outline-index="' + idx + '">'
+      + '<input data-outline-field="heading" value="' + esc(section.heading || '') + '"' + disabled + '>'
+      + '<textarea data-outline-field="brief"' + disabled + '>' + esc(section.brief || '') + '</textarea>'
+      + '<textarea data-outline-field="key_points"' + disabled + '>' + esc(points) + '</textarea>'
+      + '<div class="flex gap-2">' + regen + '</div></div>';
+  }).join('');
+  document.getElementById('outline-review-status').textContent = editable ? 'Paused before writer' : 'Outline preview';
+  panel.classList.remove('d-none');
+}
+
+function collectOutlineSections() {
+  return Array.from(document.querySelectorAll('[data-outline-index]')).map((row, idx) => {
+    const get = name => row.querySelector('[data-outline-field="' + name + '"]');
+    return {
+      heading: get('heading').value.trim(),
+      brief: get('brief').value.trim(),
+      key_points: get('key_points').value.split('\n').map(x => x.replace(/^[-*]\s*/, '').trim()).filter(Boolean),
+      level: 1,
+      template_role: currentOutlineSections[idx] ? (currentOutlineSections[idx].template_role || '') : '',
+    };
+  }).filter(s => s.heading);
+}
+
+async function approveOutline() {
+  if (!activeJobId) return;
+  document.getElementById('outline-review-status').textContent = 'Submitting...';
+  const resp = await fetch('/api/jobs/' + activeJobId + '/outline/approve/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ sections: collectOutlineSections() }),
+  });
+  if (resp.ok) {
+    markNodeDone('outline_review', AGENT_IDS.indexOf('outline_review'));
+    setStatusBadge('running');
+    document.getElementById('outline-review-status').textContent = 'Approved';
+    tlog('Outline approved. Writer resumed.', 'success');
+  } else {
+    document.getElementById('outline-review-status').textContent = 'Approve failed';
+    tlog('Outline approve failed: ' + resp.status, 'error');
+  }
+}
+
+async function regenerateSection(sectionId) {
+  if (!activeJobId) return;
+  const instructions = prompt('Regeneration note for this section:', 'Rewrite this section with stronger examples and keep the rest consistent.');
+  if (instructions === null) return;
+  const resp = await fetch('/api/jobs/' + activeJobId + '/sections/' + sectionId + '/regenerate/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ instructions }),
+  });
+  if (resp.ok) {
+    setStatusBadge('running');
+    tlog('Regenerating section #' + sectionId, 'accent');
+  } else {
+    tlog('Regenerate failed: ' + resp.status, 'error');
+  }
+}
+
 function resetPipeline(jobId, message) {
   seenRunLogKeys = new Set();
   AGENT_IDS.forEach((id, i) => {
@@ -1236,6 +1462,10 @@ function resetPipeline(jobId, message) {
   setProgress(0);
   document.getElementById('progress-fill').classList.add('animated');
   document.getElementById('terminal').innerHTML = '';
+  document.getElementById('agent-timeline').innerHTML = '';
+  document.getElementById('outline-review-panel').classList.add('d-none');
+  document.getElementById('evidence-panel').classList.add('d-none');
+  currentOutlineSections = [];
   document.getElementById('progress-job-id').textContent = '#' + jobId.slice(0,8);
   setStatusBadge('running');
   tlog(message || 'Job dispatched to Celery worker', 'accent');
@@ -1269,6 +1499,27 @@ function setWsIndicator(state) {
   el.textContent = label;
 }
 
+function addTimeline(agentId, status, detail) {
+  const list = document.getElementById('agent-timeline');
+  if (!list) return;
+  const agent = AGENTS.find(a => a.id === agentId) || { label: agentId || 'Agent' };
+  const bits = [];
+  detail = detail || {};
+  if (detail.heading) bits.push(detail.heading);
+  if (detail.word_count !== undefined) bits.push(detail.word_count + ' words');
+  if (detail.sources_count !== undefined) bits.push(detail.sources_count + ' sources');
+  if (detail.image_assets_count !== undefined) bits.push(detail.image_assets_count + ' images');
+  if (detail.sections_count !== undefined) bits.push(detail.sections_count + ' sections');
+  if (detail.qa_score !== undefined) bits.push('QA ' + detail.qa_score);
+  if (detail.next_action) bits.push(detail.next_action);
+  const row = document.createElement('div');
+  row.className = 'timeline-item';
+  row.innerHTML = '<div class="timeline-agent">' + esc(agent.label) + '</div>'
+    + '<div class="timeline-detail">' + esc(status + (bits.length ? ' - ' + bits.join(' · ') : '')) + '</div>'
+    + '<div class="timeline-time">' + new Date().toLocaleTimeString() + '</div>';
+  list.prepend(row);
+}
+
 function renderProgressFromJob(job) {
   const runs = job.agent_runs || [];
   if (!runs.length) {
@@ -1296,11 +1547,13 @@ function renderProgressFromJob(job) {
     if (!seenRunLogKeys.has(key)) {
       seenRunLogKeys.add(key);
       const type = run.status === 'completed' ? 'success' : (run.status === 'failed' ? 'error' : 'accent');
+      addTimeline(id, run.status, {});
       tlog('[' + id + '] ' + run.status, type);
     }
   });
 
   if (job.status === 'running') setStatusBadge('running');
+  if (job.status === 'paused') setStatusBadge('pending');
   const pct = Math.min(95, Math.max(4, Math.round((completed / Math.max(AGENTS.length, 1)) * 100)));
   setProgress(pct);
 }
@@ -1319,7 +1572,17 @@ function tlog(msg, type) {
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
 }
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s){
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+function csrfHeaders() {
+  const token = document.querySelector('[name=csrfmiddlewaretoken]');
+  return token ? { 'X-CSRFToken': token.value } : {};
+}
 
 /* ─────────────────────────────────────────────────────────────────────
    Export
@@ -1369,6 +1632,28 @@ async function loadAnalytics() {
   } catch {}
 }
 
+async function loadHealth() {
+  try {
+    const resp = await fetch('/api/health/');
+    const d = await resp.json();
+    setHealthBox('db', !!d.db, d.db ? 'online' : 'down');
+    setHealthBox('redis', !!d.redis, d.redis ? 'online' : 'down');
+    setHealthBox('worker', !!d.worker, d.worker ? ((d.worker_count || 1) + ' online') : 'down');
+  } catch {
+    setHealthBox('db', false, 'unknown');
+    setHealthBox('redis', false, 'unknown');
+    setHealthBox('worker', false, 'unknown');
+  }
+}
+
+function setHealthBox(id, ok, text) {
+  const dot = document.getElementById('health-' + id + '-dot');
+  const label = document.getElementById('health-' + id);
+  if (!dot || !label) return;
+  dot.className = 'health-dot ' + (ok ? 'ok' : 'bad');
+  label.textContent = text;
+}
+
 /* ─────────────────────────────────────────────────────────────────────
    Jobs history
 ───────────────────────────────────────────────────────────────────────── */
@@ -1381,22 +1666,24 @@ async function loadJobs() {
     const tbody = document.getElementById('jobs-table-body');
 
       if (!jobs.length) {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:36px;color:var(--text-3);">No jobs yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:36px;color:var(--text-3);">No jobs yet</td></tr>';
       return;
     }
 
-    const pillMap = { completed:'pill-done', running:'pill-running', failed:'pill-failed', pending:'pill-pending', cancelled:'pill-failed' };
+    const pillMap = { completed:'pill-done', running:'pill-running', paused:'pill-pending', failed:'pill-failed', pending:'pill-pending', cancelled:'pill-failed' };
     tbody.innerHTML = jobs.map(j => {
       const pillCls = pillMap[j.status] || 'pill-idle';
-      const running = j.status === 'running';
+      const running = j.status === 'running' || j.status === 'paused';
       const title   = j.title.length > 50 ? j.title.slice(0,50) + '…' : j.title;
       const type    = j.content_type.replace(/_/g,' ');
+      const domain  = (j.domain || 'tech').replace(/_/g,' ');
       const lang    = j.language || 'English';
       const time    = new Date(j.created_at).toLocaleString();
       const isComp  = j.status === 'completed';
       const langFlag = {Vietnamese:'🇻🇳',French:'🇫🇷',Spanish:'🇪🇸',German:'🇩🇪',Japanese:'🇯🇵',Chinese:'🇨🇳',Korean:'🇰🇷',English:'🇬🇧'}[lang] || '🌐';
       return '<tr class="' + (running?'row-active':'') + '" id="job-row-'+j.id+'">'
         + '<td><div class="job-title-cell" title="'+esc(j.title)+'">' + (running ? '<span style="color:var(--accent);margin-right:4px">▶</span>' : '') + esc(title)+'</div></td>'
+        + '<td><span class="type-chip">'+esc(domain)+'</span></td>'
         + '<td><span class="type-chip">'+esc(type)+'</span></td>'
         + '<td style="font-size:.72rem;color:var(--text-3);" title="'+esc(lang)+'">' + langFlag + '</td>'
         + '<td><span class="status-pill '+pillCls+'" style="font-size:.68rem">'+j.status.toUpperCase()+'</span></td>'
@@ -1405,12 +1692,12 @@ async function loadJobs() {
         + '<td style="color:var(--text-3);font-size:.75rem;">'+time+'</td>'
         + '<td style="display:flex;gap:5px;flex-wrap:wrap;">'
         + (isComp ? '<a href="/jobs/'+j.id+'/" class="view-btn">📖 Read</a>' : '')
-        + '<button onclick="confirmDelete(\''+j.id+'\', \''+esc(title.replace(/'/g,"&#39;"))+'\')\" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:rgba(242,93,93,.3);">🗑</button>'
+        + '<button type="button" data-job-delete="'+esc(j.id)+'" data-job-title="'+esc(title)+'" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:rgba(242,93,93,.3);">🗑</button>'
         + '</td>'
         + '</tr>';
     }).join('');
 
-    const runningJob = jobs.find(j => j.status === 'running');
+    const runningJob = jobs.find(j => j.status === 'running' || j.status === 'paused');
     if (runningJob && !activeJobId) {
       activeJobId = runningJob.id;
       startTracking(runningJob, true);
@@ -1425,11 +1712,19 @@ async function loadJobs() {
 ───────────────────────────────────────────────────────────────────────── */
 loadJobs();
 loadAnalytics();
+loadHealth();
 setInterval(loadJobs, 30000);
+setInterval(loadHealth, 30000);
 
 /* ─────────────────────────────────────────────────────────────────────
    Delete job
 ───────────────────────────────────────────────────────────────────────── */
+document.addEventListener('click', function(event) {
+  const button = event.target.closest('[data-job-delete]');
+  if (!button) return;
+  confirmDelete(button.dataset.jobDelete, button.dataset.jobTitle || 'this job');
+});
+
 let _deleteJobId = null;
 function confirmDelete(jobId, title) {
   _deleteJobId = jobId;
@@ -1447,7 +1742,7 @@ async function executeDelete() {
   try {
     const resp = await fetch('/api/jobs/' + jobId + '/', {
       method: 'DELETE',
-      headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+      headers: csrfHeaders(),
     });
     if (resp.ok || resp.status === 204) {
       tlog('Job deleted', 'info');
@@ -1509,7 +1804,7 @@ async function saveEdit() {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+        ...csrfHeaders(),
       },
       body: JSON.stringify({ content_text: text }),
     });

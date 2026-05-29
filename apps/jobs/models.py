@@ -27,11 +27,45 @@ class Job(models.Model):
         STANDARD = "standard", "Standard"
         STRICT = "strict", "Strict"
 
+    class Domain(models.TextChoices):
+        TECH = "tech", "Tech"
+        MARKETING = "marketing", "Marketing"
+        EDUCATION = "education", "Education"
+        FINANCE = "finance", "Finance"
+        HEALTHCARE = "healthcare", "Healthcare"
+        LEGAL = "legal", "Legal"
+
+    class Tone(models.TextChoices):
+        CLEAR = "clear", "Clear"
+        PROFESSIONAL = "professional", "Professional"
+        PRACTICAL = "practical", "Practical"
+        EXECUTIVE = "executive", "Executive"
+        FRIENDLY = "friendly", "Friendly"
+        FORMAL = "formal", "Formal"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=500)
     topic = models.TextField(help_text="Primary topic / research question")
     content_type = models.CharField(
         max_length=30, choices=ContentType.choices, default=ContentType.BLOG_POST
+    )
+    domain = models.CharField(
+        max_length=30,
+        choices=Domain.choices,
+        default=Domain.TECH,
+        help_text="Domain guide used by research, writing, editing, and QA",
+    )
+    audience = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text="Target audience, e.g. developers, executives, students",
+    )
+    tone = models.CharField(
+        max_length=30,
+        choices=Tone.choices,
+        default=Tone.CLEAR,
+        help_text="Preferred writing tone",
     )
     quality_mode = models.CharField(
         max_length=20,
@@ -48,6 +82,17 @@ class Job(models.Model):
         help_text="Output language (e.g. English, Vietnamese, French, Spanish)"
     )
     additional_instructions = models.TextField(blank=True)
+    outline_review_required = models.BooleanField(
+        default=True,
+        help_text="Pause after outline generation so the user can approve or edit it",
+    )
+    approved_outline = models.JSONField(default=list, blank=True)
+    outline_approved_at = models.DateTimeField(null=True, blank=True)
+    pipeline_state = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Latest resumable PipelineState checkpoint",
+    )
 
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
@@ -92,6 +137,7 @@ class AgentRun(models.Model):
     class AgentType(models.TextChoices):
         COORDINATOR = "coordinator", "Coordinator"
         COORDINATOR_ROUTER = "coordinator_router", "Coordinator Router"
+        IMAGE_RESEARCH = "image_research", "Image Research"
         RESEARCH = "research", "Research"
         OUTLINE = "outline", "Outline"
         WRITER = "writer", "Writer"
@@ -146,6 +192,7 @@ class Artifact(models.Model):
         QA_REPORT = "qa_report", "QA Report"
         FACT_CHECK_REPORT = "fact_check_report", "Fact Check Report"
         SOURCE_DOCUMENTS = "source_documents", "Source Documents"
+        IMAGE_ASSETS = "image_assets", "Image Assets"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="artifacts")

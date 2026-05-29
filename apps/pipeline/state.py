@@ -12,8 +12,23 @@ from typing import Any, Optional
 class SourceDocument:
     url: str
     title: str
-    content: str  # Truncated to 1500 chars per doc (token optimisation)
-    source_type: str = "web"  # "web" | "scraped"
+    content: str  # Truncated source text used as evidence
+    source_type: str = "web"  # "web" | "scraped" | "image"
+
+
+@dataclass
+class ImageAsset:
+    title: str
+    url: str = ""
+    thumbnail_url: str = ""
+    source_url: str = ""
+    alt_text: str = ""
+    caption: str = ""
+    attribution: str = ""
+    license: str = ""
+    provider: str = ""
+    width: int = 0
+    height: int = 0
 
 
 @dataclass
@@ -22,6 +37,7 @@ class OutlineSection:
     level: int  # 1 = H2, 2 = H3
     brief: str  # 1-2 sentence brief for the writer
     key_points: list[str] = field(default_factory=list)
+    template_role: str = ""
 
 
 @dataclass
@@ -31,6 +47,7 @@ class SectionWriteTask:
     heading: str
     brief: str
     key_points: list[str] = field(default_factory=list)
+    template_role: str = ""
     target_words: int = 150
     relevant_sources: list[dict[str, str]] = field(default_factory=list)
     revision_count: int = 0
@@ -60,9 +77,10 @@ class SEOMetadata:
 @dataclass
 class QAReport:
     overall_score: float = 0.0          # 0-100
-    clarity_score: float = 0.0          # 25 pts
-    accuracy_score: float = 0.0         # 25 pts
-    engagement_score: float = 0.0       # 20 pts
+    clarity_score: float = 0.0          # 20 pts
+    accuracy_score: float = 0.0         # 20 pts
+    engagement_score: float = 0.0       # 15 pts
+    format_adherence_score: float = 0.0 # 15 pts
     seo_score: float = 0.0              # 15 pts
     completeness_score: float = 0.0     # 15 pts
     passed: bool = False
@@ -85,14 +103,19 @@ class PipelineState:
     job_id: str = ""
     topic: str = ""
     content_type: str = "blog_post"
+    domain: str = "tech"
+    audience: str = ""
+    tone: str = ""
     quality_mode: str = "standard"    # fast | standard | strict
     target_length: int = 1500       # words
     keywords: list[str] = field(default_factory=list)
+    language: str = "English"
     additional_instructions: str = ""
 
     # ------------------------------------------------------------------ #
     # Research Agent output                                                #
     # ------------------------------------------------------------------ #
+    image_assets: list[ImageAsset] = field(default_factory=list)
     sources: list[SourceDocument] = field(default_factory=list)
     research_summary: str = ""      # Max 3000 chars summary passed to Outline Agent
 
@@ -178,6 +201,13 @@ class PipelineState:
         d = {k: v for k, v in data.items() if k in valid}
 
         # Reconstruct list[SourceDocument]
+        if d.get("image_assets"):
+            image_fields = {f.name for f in dataclasses.fields(ImageAsset)}
+            d["image_assets"] = [
+                ImageAsset(**{k: v for k, v in s.items() if k in image_fields}) if isinstance(s, dict) else s
+                for s in d["image_assets"]
+            ]
+
         if d.get("sources"):
             d["sources"] = [
                 SourceDocument(**s) if isinstance(s, dict) else s

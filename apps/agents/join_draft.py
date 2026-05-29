@@ -6,7 +6,8 @@ import logging
 from apps.pipeline.state import PipelineState, SectionDraft
 
 from .base import BaseAgent
-from .content_guides import get_conclusion_heading
+from .content_guides import get_conclusion_heading, get_intro_heading
+from .image_research import markdown_for_image
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +65,33 @@ class JoinDraftAgent(BaseAgent):
         parts = []
 
         if state.introduction:
-            parts.append(state.introduction)
+            intro_heading = get_intro_heading(state.content_type)
+            if intro_heading:
+                parts.append(f"## {intro_heading}\n\n{state.introduction}")
+            else:
+                parts.append(state.introduction)
+            image = self._image_block(state, 0)
+            if image:
+                parts.append(image)
 
-        for section in state.sections:
+        for idx, section in enumerate(state.sections, start=1):
             body = state.body_sections.get(section.heading, "")
             if body:
                 parts.append(f"\n## {section.heading}\n\n{body}")
+                image = self._image_block(state, idx)
+                if image:
+                    parts.append(image)
 
         if state.conclusion:
             parts.append(f"\n## {get_conclusion_heading(state.content_type)}\n\n{state.conclusion}")
 
         return "\n\n".join(part.strip() for part in parts if part.strip())
+
+    @staticmethod
+    def _image_block(state: PipelineState, index: int) -> str:
+        if index >= len(state.image_assets):
+            return ""
+        return markdown_for_image(state.image_assets[index])
 
     @staticmethod
     def _apply_writer_usage(state: PipelineState) -> None:

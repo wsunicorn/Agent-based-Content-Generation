@@ -10,7 +10,7 @@ import logging
 from apps.pipeline.state import PipelineState, SectionWriteTask
 
 from .base import BaseAgent
-from .content_guides import get_conclusion_heading
+from .content_guides import get_conclusion_brief, get_conclusion_heading, get_intro_brief, get_intro_heading
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,9 @@ class WriterAgent(BaseAgent):
             SectionWriteTask(
                 section_id=0,
                 section_kind="introduction",
-                heading="Introduction",
-                brief=(
-                    "Open the article with a clear hook, frame the reader problem, "
-                    "and preview the value of the article."
-                ),
+                heading=get_intro_heading(state.content_type) or "Introduction",
+                brief=get_intro_brief(state.content_type),
+                template_role="Introduction",
                 target_words=intro_words,
                 relevant_sources=self._source_refs(state),
                 revision_count=state.revision_count,
@@ -53,6 +51,7 @@ class WriterAgent(BaseAgent):
                     heading=section.heading,
                     brief=section.brief,
                     key_points=section.key_points,
+                    template_role=section.template_role,
                     target_words=body_words,
                     relevant_sources=self._source_refs(state),
                     revision_count=state.revision_count,
@@ -64,10 +63,8 @@ class WriterAgent(BaseAgent):
                 section_id=len(tasks),
                 section_kind="conclusion",
                 heading=get_conclusion_heading(state.content_type),
-                brief=(
-                    "Close the article according to the content type: CTA for blog, "
-                    "recommendations for reports, implications for news, next steps for tutorials."
-                ),
+                brief=get_conclusion_brief(state.content_type),
+                template_role="Conclusion",
                 target_words=conclusion_words,
                 relevant_sources=self._source_refs(state, limit=2),
                 revision_count=state.revision_count,

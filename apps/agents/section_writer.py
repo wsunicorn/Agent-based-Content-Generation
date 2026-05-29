@@ -7,6 +7,7 @@ from apps.pipeline.state import PipelineState, SectionDraft, SectionWriteTask
 
 from .base import BaseAgent
 from .content_guides import get_content_type_guide
+from .domain_guides import get_domain_guide_text
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +56,18 @@ class SectionWriterAgent(BaseAgent):
         if task.section_kind == "introduction":
             return (
                 "You are an expert introduction writer. Write a concise article opening "
-                "that hooks the reader, frames the problem, and previews the value. "
+                "that follows the provided content-type template role. "
                 "Do not add a Markdown heading."
             )
         if task.section_kind == "conclusion":
             return (
                 "You are an expert conclusion writer. Write a concise ending that "
-                "matches the content type and gives the reader a clear final takeaway. "
+                "matches the content type template and gives the reader a clear ending. "
                 "Do not add a Markdown heading."
             )
         return (
             "You are an expert section writer. Write one focused, useful article "
-            "section from the provided brief. Do not repeat the Markdown heading."
+            "section from the provided brief and template role. Do not repeat the Markdown heading."
         )
 
     def _user_prompt(self, state: PipelineState, task: SectionWriteTask) -> str:
@@ -81,13 +82,18 @@ class SectionWriterAgent(BaseAgent):
         return (
             f"Article topic: {state.topic}\n"
             f"Content type: {state.content_type.replace('_', ' ').title()}\n"
+            f"Domain: {state.domain}\n"
+            f"Audience: {state.audience or 'general'}\n"
+            f"Tone: {state.tone or 'clear'}\n"
             f"Section kind: {task.section_kind}\n"
             f"Section heading: {task.heading}\n"
+            f"Template role: {task.template_role or 'unspecified'}\n"
             f"Section brief: {task.brief}\n"
             f"Target length: approximately {task.target_words} words\n"
             f"Keywords: {', '.join(state.keywords) if state.keywords else 'none'}\n\n"
             f"Key points:\n{key_points}\n\n"
             f"Content type guide:\n{get_content_type_guide(state.content_type)}\n\n"
+            f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Additional instructions:\n{state.additional_instructions or 'None'}\n\n"
             f"Revision instructions:\n{revision_notes}\n\n"
             f"Research summary:\n{state.research_summary[:900] or 'No external research summary available.'}\n\n"
