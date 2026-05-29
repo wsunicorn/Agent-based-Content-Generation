@@ -34,14 +34,50 @@ call .venv\Scripts\activate.bat
 echo [2/4] Running database migrations...
 python manage.py migrate --settings=config.settings.development
 if errorlevel 1 (
+@echo off
+title Content Generation Pipeline - Startup
+chcp 65001 >nul
+color 0A
+
+echo ============================================================
+echo   Agent-based Content Generation Pipeline
+echo   Starting all services...
+echo ============================================================
+echo.
+
+:: ─── Kiểm tra thư mục hiện tại ───────────────────────────────
+cd /d "%~dp0"
+
+:: ─── Kiểm tra virtual environment ───────────────────────────────
+if not exist ".venv\Scripts\activate.bat" (
+    echo [ERROR] Virtual environment not found at .venv\
+    echo Please run: python -m venv .venv ^&^& .venv\Scripts\pip install -r requirements\development.txt
+    pause
+    exit /b 1
+)
+
+:: ─── Kiểm tra file .env ──────────────────────────────────────
+if not exist ".env" (
+    echo [ERROR] .env file not found!
+    echo Please copy .env.example to .env and fill in your API keys.
+    pause
+    exit /b 1
+)
+
+echo [1/4] Activating virtual environment...
+call .venv\Scripts\activate.bat
+
+echo [2/4] Running database migrations...
+python manage.py migrate --settings=config.settings.development
+if errorlevel 1 (
     echo [ERROR] Migration failed. Check your DATABASE_URL in .env
     pause
     exit /b 1
 )
 
 echo.
-echo [3/4] Starting Celery worker...
-start "Celery Worker" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && celery -A config worker -l info -P solo"
+echo [3/4] Starting Celery worker (Gevent Pool - 4 lanes)...
+start "Celery Worker" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && celery -A config worker -l info -P gevent -c 4"
 
 echo Waiting for Celery to initialize...
 timeout /t 3 /nobreak >nul
