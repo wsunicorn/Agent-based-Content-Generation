@@ -1,480 +1,161 @@
-# Workflow Chi Tiết
+# Luồng Công Việc Chi Tiết (Detailed Workflow)
 
-## 1. Luồng Tổng Quan
+Tài liệu này hướng dẫn chi tiết từng bước xử lý dữ liệu và cách các Agent phối hợp nhịp nhàng trong đồ thị LangGraph của hệ thống **Domain LLM Assistant** để tạo ra một bài viết hoàn chỉnh đạt tiêu chuẩn cao.
+
+---
+
+## 1. Sơ đồ luồng xử lý tổng thể
 
 ```
-User Input
-    │
-    ▼
-┌──────────────────────────────────┐
-│  INPUT: topic, audience, tone,   │
-│  content_type, target_words      │
-└──────────────┬───────────────────┘
-               │
-               ▼
-        [Coordinator]  ← Khởi tạo Job, tạo PipelineState
-               │
-               ▼
-      ┌────────────────┐
-      │ Research Agent │
-      │                │
-      │ · Web search   │  ← Tavily Search API
-      │ · Scrape pages │  ← Playwright + BS4
-      │ · Extract data │
-      └───────┬────────┘
-              │ ResearchDossier
-              ▼
-      ┌────────────────┐
-      │ Outline Agent  │
-      │                │
-      │ · Tạo sections │
-      │ · Phân bổ words│
-      │ · Section brief│
-      └───────┬────────┘
-              │ Outline
-              ▼
-    ┌─────────────────────────────────┐
-    │       PARALLEL WRITING          │
-    │                                 │
-    │  ┌────────┐  ┌────────────────┐ │
-    │  │ Intro  │  │  Body Sect. 1  │ │
-    │  │ Writer │  │  Writer        │ │
-    │  └────┬───┘  └───────┬────────┘ │
-    │       │              │          │
-    │  ┌────────────────┐  │          │
-    │  │  Body Sect. 2  │  │          │
-    │  │  Writer        │  │          │
-    │  └────┬───────────┘  │          │
-    │       │   ┌──────────┴──────┐   │
-    │       │   │  Conclusion     │   │
-    │       │   │  Writer         │   │
-    │       │   └──────┬──────────┘   │
-    └───────┴──────────┴──────────────┘
-              │ (join khi tất cả xong)
-              ▼
-      ┌────────────────┐
-      │  Editor Agent  │
-      │                │
-      │ · Grammar check│
-      │ · Clarity edit │
-      │ · Consistency  │
-      │ · Cut fluff    │
-      └───────┬────────┘
-              │ Edited Draft
-              ▼
-      ┌────────────────┐
-      │   SEO Agent    │
-      │                │
-      │ · Keywords     │
-      │ · Meta desc    │
-      │ · Headers      │
-      │ · Readability  │
-      └───────┬────────┘
-              │ SEO Package
-              ▼
-      ┌─────────────────┐
-      │ Fact-Checker    │
-      │                 │
-      │ · Extract claims│
-      │ · Verify sources│
-      │ · Flag unverif. │
-      └───────┬─────────┘
-              │ Fact Report
-              ▼
-      ┌────────────────┐
-      │   QA Agent     │
-      │                │  score ≥ 7.5?
-      │ · Score 1-10   │──── YES ────► FINAL OUTPUT
-      │ · Clarity      │
-      │ · Engagement   │  score < 7.5?
-      │ · Accuracy     │──── NO  ────► revision_count < 3?
-      │ · SEO          │                    │
-      └────────────────┘              YES ──┘ quay về Editor
-                                      NO  ──► Output + Warning
+                   Người dùng nhập thông tin (Topic, Domain, Keywords...)
+                                           │
+                                           ▼
+                                    [Coordinator]
+                         (Khởi tạo cấu hình và phân bổ tham số)
+                                           │
+                                           ├───► Nếu dàn ý đã được duyệt trước đó
+                                           │     │
+                                           │     ▼
+                                           │  [Writer] (Lập kế hoạch phân chia phần)
+                                           │
+                                           └───► Nếu chạy lần đầu tiên
+                                                 │
+                                                 ▼
+                                          [ImageResearch]
+                                    (Tìm kiếm ảnh Wikimedia Commons)
+                                                 │
+                                                 ▼
+                                            [Research]
+                                      (Cào dữ liệu từ internet)
+                                                 │
+                                                 ▼
+                                            [Outline]
+                                     (Tạo dàn bài viết chi tiết)
+                                                 │
+                                                 ▼
+                                        [Chờ duyệt Outline]
+                                 (Gửi về giao diện UI chờ duyệt)
+                                                 │
+                                                 ▼ (Sau khi người dùng phê duyệt)
+                                              [Writer]
+                                                 │
+                                                 ▼
+                                        [SectionWriters*]
+                              (Viết các phần song song bằng Celery)
+                                                 │
+                                                 ▼
+                                            [JoinDraft]
+                                (Ghép nối và tự động chèn ảnh)
+                                                 │
+                                                 ▼
+                                             [Editor]
+                                    (Biên tập nâng cao văn phong)
+                                                 │
+                                                 ▼
+                                      [Coordinator Router]
+                                    (Cổng kiểm định chất lượng)
+                              ┌──────────────────┼──────────────────┐
+                              ▼                  ▼                  ▼
+                        [Fact-Checker]         [SEO]               [QA]
+                      (Kiểm chứng sự thật)  (Tối ưu SEO)     (Đánh giá QA)
+                              │                  │                  │
+                              └──────────────────┼──────────────────┘
+                                                 ▼
+                                        [Coordinator Router]
+                                                 │
+                                                 ├───► QA duyệt qua (score >= 75) ──► [HOÀN THÀNH]
+                                                 │
+                                                 └───► Chất lượng yếu (QA fail)   ──► [SỬA LẠI]
+                                                       (Gửi hướng dẫn sửa chi tiết về cho Editor/Writer)
 ```
 
 ---
 
-## 2. Chi Tiết Từng Bước
+## 2. Chi Tiết 9 Bước Trong Quy Trình Xử Lý
 
-### Bước 1 — User Input & Job Creation
-
-**Input Schema:**
-
-```json
-{
-  "topic": "Benefits of Multi-Agent AI Systems",
-  "audience": "Tech professionals and AI enthusiasts",
-  "tone": "informative, authoritative, slightly conversational",
-  "content_type": "blog_post",
-  "target_words": 1500,
-  "language": "English",
-  "focus_keywords": ["multi-agent AI", "AI automation", "LangGraph"]
-}
-```
-
-**Actions:**
-
-1. Validate input
-2. Tạo `Job` record trong DB với status `pending`
-3. Estimate cost (dựa trên target_words × avg tokens/word × price)
-4. Dispatch Celery task `run_pipeline.delay(job_id)`
-5. Return `job_id` và WebSocket URL cho client
+### Bước 1 — Khởi tạo cấu hình & Phê duyệt tham số (Coordinator Node)
+* **Nhiệm vụ:** Tiếp nhận yêu cầu tạo Job từ Web UI/API. Tiến hành chuẩn hóa các tham số và cài đặt các ranh giới (quality gates) cho pipeline.
+* **Quy trình:**
+  1. Kiểm tra loại bài viết (`content_type`) và chọn hướng dẫn lĩnh vực (`domain`) tương ứng.
+  2. Dựa vào chế độ chất lượng (`quality_mode`: standard | fast | strict), thiết lập số vòng sửa đổi tối đa (`max_revisions`) và số lần thử lại tối đa của từng Agent (`max_agent_retries`).
+  3. Lưu giữ trạng thái khởi tạo ban đầu và chuyển tiếp sang node xử lý tiếp theo.
 
 ---
 
-### Bước 2 — Research Agent
-
-**Mục tiêu:** Thu thập dữ liệu thực tế từ internet.
-
-**Input:** `topic`, `audience`, `focus_keywords`
-
-**Process:**
-
-```
-1. Tavily Search
-   └── Query: "{topic} {year} statistics research"
-   └── Query: "{topic} benefits examples case studies"
-   └── Query: "{topic} expert opinions"
-   → Nhận về: title, url, content, score
-
-2. Filter top sources (score ≥ 0.7)
-
-3. Scrape full page content (Playwright cho JS-heavy sites)
-   └── BeautifulSoup để extract main content
-   └── Remove ads, nav, footer
-
-4. LLM Extraction (gemini-2.5-flash)
-   Prompt: "Extract key facts, statistics, quotes from this text..."
-   → facts[], statistics[], quotes[], subtopics[]
-
-5. Aggregate → ResearchDossier
-```
-
-**Output — `ResearchDossier`:**
-
-```json
-{
-  "facts": [
-    "Multi-agent systems can complete complex tasks 60% faster...",
-    ...
-  ],
-  "statistics": [
-    { "value": "60%", "context": "faster task completion", "source": "..." },
-    ...
-  ],
-  "quotes": [
-    { "text": "...", "author": "...", "source_url": "..." },
-    ...
-  ],
-  "sources": [
-    { "url": "...", "title": "...", "credibility_score": 0.85 },
-    ...
-  ],
-  "subtopics": ["collaboration", "scalability", "use cases", ...],
-  "keywords_found": ["multi-agent", "LLM orchestration", ...]
-}
-```
+### Bước 2 — Tìm kiếm hình ảnh tự động (Image Research Agent)
+* **Nhiệm vụ:** Tìm kiếm các hình ảnh chất lượng cao, miễn phí bản quyền để minh họa sống động cho bài viết dựa trên chủ đề và từ khóa.
+* **Quy trình:**
+  1. Gọi API của **Wikimedia Commons** để truy vấn các hình ảnh liên quan trực tiếp đến từ khóa SEO và chủ đề bài viết.
+  2. Trích xuất các thông tin siêu dữ liệu (metadata) của ảnh: `url` gốc, `title`, tên tác giả (`attribution`), loại giấy phép sử dụng (`license`) và tự động soạn thảo thẻ mô tả `alt_text` cho công cụ đọc màn hình.
+  3. Lưu danh sách ảnh cào được vào kết quả `image_assets` của Pipeline State dưới dạng artifact để sử dụng sau.
 
 ---
 
-### Bước 3 — Outline Agent
-
-**Mục tiêu:** Tạo cấu trúc bài viết logic, phân bổ word count.
-
-**Input:** `ResearchDossier`, `target_words`, `content_type`
-
-**Process:**
-
-```
-1. Phân tích research dossier để xác định các themes chính
-2. LLM tạo hierarchical outline
-3. Phân bổ word count: intro (10%) | body (80%) | conclusion (10%)
-4. Tạo section brief cho mỗi phần (gồm key points + sources cần dùng)
-```
-
-**Output — `Outline`:**
-
-```json
-{
-  "title": "The Power of Multi-Agent AI Systems: ...",
-  "sections": [
-    {
-      "id": "intro",
-      "type": "introduction",
-      "heading": null,
-      "brief": "Hook với statistic, introduce problem, thesis statement",
-      "key_points": ["...", "..."],
-      "target_words": 150,
-      "sources_to_use": ["url1", "url2"]
-    },
-    {
-      "id": "body_1",
-      "type": "body",
-      "heading": "What Are Multi-Agent AI Systems?",
-      "heading_level": "H2",
-      "brief": "Define concept, explain architecture",
-      "key_points": ["Definition", "Components", "How they differ from single agents"],
-      "target_words": 300,
-      "sources_to_use": ["url3", "url4"]
-    },
-    ...
-    {
-      "id": "conclusion",
-      "type": "conclusion",
-      "heading": null,
-      "brief": "Summarize key points, CTA, future outlook",
-      "target_words": 150,
-      "sources_to_use": []
-    }
-  ],
-  "estimated_total_words": 1500
-}
-```
+### Bước 3 — Nghiên cứu nguồn tư liệu (Research Agent)
+* **Nhiệm vụ:** Thu thập thông tin thực tế từ internet để làm bằng chứng khoa học cho bài viết.
+* **Quy trình:**
+  1. Sử dụng **Tavily Search API** phát các câu truy vấn thông minh đa chiều tìm kiếm thông tin về chủ đề.
+  2. Tự động loại bỏ các liên kết trùng lặp và lọc ra tối đa 4 nguồn tư liệu uy tín có độ tương đồng ngữ nghĩa cao nhất.
+  3. Sử dụng thư viện cào chuyên dụng (Playwright cho trang web dùng nhiều JavaScript, BeautifulSoup cho trang web tĩnh) để tải nội dung thô của các trang web.
+  4. LLM trích xuất các facts quan trọng, các số liệu thống kê đáng tin cậy (`statistics`), và các trích dẫn đắt giá (`quotes`), lưu vào `source_documents` và `research_summary` để làm tài liệu đối chiếu cho Fact-Checker Agent sau này.
 
 ---
 
-### Bước 4 — Parallel Writing
-
-**Mục tiêu:** Viết nội dung cho từng section đồng thời.
-
-Mỗi writer nhận riêng section của mình:
-
-```
-Input per writer:
-{
-  "section":         { ...section brief from Outline... },
-  "research_dossier": { ...ResearchDossier... },
-  "tone":            "informative, authoritative",
-  "style_guide":     "Active voice, short paragraphs (3-4 sentences)..."
-}
-```
-
-**Style Guide** được chia sẻ giữa tất cả writers để đảm bảo voice nhất quán.
-
-**Output per writer — `SectionDraft`:**
-
-```json
-{
-  "section_id":      "body_1",
-  "content":         "Multi-agent AI systems represent...\n\n...",
-  "word_count":      312,
-  "sources_cited":   ["url3", "url4"],
-  "confidence":      0.88
-}
-```
-
-**Join strategy:** Chờ tất cả 4 writers (intro + body×N + conclusion) xong rồi merge theo thứ tự outline.
+### Bước 4 — Lập dàn ý bài viết & Duyệt Dàn Ý (Outline Agent)
+* **Nhiệm vụ:** Thiết lập cấu trúc dàn bài logic, mạch lạc.
+* **Quy trình:**
+  1. Outline Agent chọn mẫu bài viết tương ứng với `content_type` của người dùng:
+     * *Blog Post:* Mở đầu ấn tượng (Hook), Nêu vấn đề, Các phần giải pháp thực tế kèm ví dụ, Các takeaways/Lời kêu gọi hành động (CTA).
+     * *Technical Report:* Tóm tắt điều hành, Phương pháp nghiên cứu, Phát hiện chính, Giới hạn và Khuyến nghị.
+     * *News Article:* Dẫn dắt thông tin (Lead), Bối cảnh, Quan điểm các bên, Tác động và Thông tin nền.
+     * *Tutorial:* Điều kiện cần (Prerequisites), Các bước thực hành, Khắc phục lỗi và Bước tiếp theo.
+  2. LLM phân bổ số từ mục tiêu (`target_words`) cho từng phần, viết ngắn gọn nội dung cần đạt của từng phần (`brief`) và chỉ định rõ các `key_points` cùng nguồn dữ liệu cần cào.
+  3. **Chờ phê duyệt (Outline Review):** Nếu người dùng chọn bật duyệt dàn ý, Celery task sẽ tạm thời chuyển trạng thái Job sang `paused` và lưu checkpoint trạng thái LangGraph vào DB. Người dùng có thể chỉnh sửa tiêu đề, tóm tắt các phần trực tiếp trên UI rồi nhấn "Approve & continue" để kích hoạt Celery tiếp tục chạy đồ thị từ bước tiếp theo.
 
 ---
 
-### Bước 5 — Editor Agent
-
-**Mục tiêu:** Chỉnh sửa toàn bộ draft thành văn bản hoàn chỉnh.
-
-**Input:** Merged full draft + ResearchDossier (để cross-check)
-
-**Checklist:**
-
-```
-□ Grammar & spelling
-□ Sentence clarity (passive → active voice)
-□ Paragraph transitions (smooth giữa các sections)
-□ Redundancy removal (cắt fluff)
-□ Consistent tone/voice across sections
-□ Fact accuracy (so với research dossier)
-□ Word count target ±10%
-```
-
-**Output:**
-
-```json
-{
-  "edited_content":  "...",
-  "word_count":      1487,
-  "changes_summary": [
-    { "type": "grammar", "count": 12 },
-    { "type": "clarity", "count": 8 },
-    { "type": "transition", "count": 3 },
-    { "type": "removed_fluff", "words_cut": 47 }
-  ]
-}
-```
+### Bước 5 — Viết các phần song song & Ghép Bản Nháp (Writer & Join Draft Nodes)
+* **Nhiệm vụ:** Soạn thảo nội dung thô cho bài viết một cách nhanh chóng và chất lượng.
+* **Quy trình:**
+  1. **Writer Planner Node:** Đọc dàn ý được duyệt, phân bổ thành các nhiệm vụ độc lập cho từng phần bài viết (`writer_tasks`).
+  2. **Section Writer Agent (Song song):** LangGraph tự động phát tán (fan-out) các luồng Celery bất đồng bộ chạy song song. Mỗi tác vụ nhận một brief của phần tương ứng và thực hiện viết bài thô bám sát giọng văn (`tone`) và đối tượng độc giả mục tiêu. Giới hạn số lượng chạy song song bằng cấu hình `MAX_PARALLEL_WRITERS`.
+  3. **Join Draft Node:** Đợi tất cả các phần viết song song hoàn thành, hệ thống thực hiện thu hồi và ghép nối các chuỗi nội dung lại theo đúng thứ tự dàn ý.
+  4. **Tự động chèn ảnh:** Join Draft Agent tự động phân tích cấu trúc bài viết và chèn thẻ Markdown hiển thị ảnh bản quyền mở thu được từ bước 2 vào vị trí cực kỳ hợp lý (ngay sau đoạn giới thiệu Intro và sau các H2 chính của thân bài).
 
 ---
 
-### Bước 6 — SEO Agent
-
-**Mục tiêu:** Tối ưu bài viết cho search engines.
-
-**Process:**
-
-```
-1. Keyword density analysis (target: focus keyword 1-2%)
-2. Header structure optimization (H1 → H2 → H3)
-3. Generate Title Tag (50-60 chars)
-4. Generate Meta Description (150-160 chars)
-5. Readability score (Flesch-Kincaid)
-6. Internal linking suggestions (placeholder)
-7. Image alt text suggestions
-```
-
-**Output — `SEOPackage`:**
-
-```json
-{
-  "title_tag":           "Benefits of Multi-Agent AI Systems | Complete Guide",
-  "meta_description":    "Discover how multi-agent AI systems boost productivity...",
-  "focus_keyword":       "multi-agent AI systems",
-  "secondary_keywords":  ["AI automation", "LangGraph", "agent collaboration"],
-  "keyword_density":     { "multi-agent AI systems": 1.4 },
-  "readability_score":   67.2,
-  "readability_grade":   "8th Grade",
-  "heading_structure":   { "h1": 1, "h2": 4, "h3": 6 },
-  "optimized_content":   "...",
-  "recommendations":     [
-    "Add focus keyword in first paragraph",
-    "Consider adding FAQ section for featured snippet"
-  ]
-}
-```
+### Bước 6 — Biên tập chuyên sâu văn phong (Editor Agent)
+* **Nhiệm vụ:** Chỉnh sửa ngữ pháp, tăng độ trôi chảy và đồng bộ giọng văn thống nhất giữa các phần do các mô hình song song viết.
+* **Quy trình:**
+  1. LLM rà soát toàn bộ bài viết, sửa chữa các lỗi lặp từ, cải thiện các đoạn chuyển tiếp mượt mà giữa các chương.
+  2. Cắt bỏ hoàn toàn các từ thừa, sáo rỗng (fluff), điều chỉnh số lượng từ sát với mục tiêu ban đầu của người dùng (trong khoảng sai số ±10%).
+  3. Lưu bài viết đã được tối ưu hóa vào artifact dạng `edited_draft`.
 
 ---
 
-### Bước 7 — Fact-Checker Agent
-
-**Mục tiêu:** Xác minh các claims trong bài viết.
-
-**Process:**
-
-```
-1. Extract tất cả factual claims từ bài viết (LLM)
-2. Map mỗi claim với source trong ResearchDossier
-3. Flag claims không có source
-4. Confidence scoring per claim
-```
-
-**Output — `FactReport`:**
-
-```json
-{
-  "total_claims": 18,
-  "verified": 15,
-  "unverified": 3,
-  "claims": [
-    {
-      "text":       "Multi-agent systems complete tasks 60% faster",
-      "status":     "verified",
-      "source_url": "https://...",
-      "confidence": 0.92
-    },
-    {
-      "text":       "Over 500 companies use LangGraph in production",
-      "status":     "unverified",
-      "flag":       "No source found — recommend removing or citing",
-      "confidence": 0.3
-    }
-  ],
-  "accuracy_score": 83.3
-}
-```
+### Bước 7 — Kiểm chứng dữ liệu thực tế (Fact-Checker Agent)
+* **Nhiệm vụ:** Đảm bảo tính trung thực và chính xác của bài viết, tránh hiện tượng LLM sinh dữ liệu ảo (hallucination).
+* **Quy trình:**
+  1. LLM quét bài viết và trích xuất ra tối đa 6 tuyên bố liên quan đến sự thật, số liệu thống kê hoặc sự kiện (factual claims).
+  2. So khớp từng tuyên bố này so với tài liệu nghiên cứu gốc `source_documents` thu được từ Bước 3 bằng phương pháp phân tích ngữ nghĩa.
+  3. Ánh xạ rõ ràng tuyên bố nào tương ứng với nguồn gốc tham khảo nào. Nếu tuyên bố nào hoàn toàn không tìm thấy bằng chứng trong tài liệu gốc sẽ bị đánh cờ Flag cảnh báo để Editor biên tập loại bỏ hoặc sửa lại.
 
 ---
 
-### Bước 8 — QA Agent
-
-**Mục tiêu:** Đánh giá tổng thể, quyết định approve hay revise.
-
-**Scoring Rubric:**
-
-| Dimension    | Weight | Criteria                                      |
-| ------------ | ------ | --------------------------------------------- |
-| Clarity      | 25%    | Dễ đọc, logic flow, transitions            |
-| Accuracy     | 25%    | Fact coverage, source quality                 |
-| Engagement   | 20%    | Hook strength, varied sentence structure      |
-| SEO          | 15%    | Keyword optimization, readability score       |
-| Completeness | 15%    | Covers all outline sections, meets word count |
-
-**Output:**
-
-```json
-{
-  "overall_score":   8.2,
-  "dimension_scores": {
-    "clarity":     8.5,
-    "accuracy":    8.0,
-    "engagement":  7.8,
-    "seo":         8.5,
-    "completeness": 8.2
-  },
-  "decision":        "approved",
-  "feedback":        "Strong article. Consider adding one more real-world example in body section 2.",
-  "revision_count":  1
-}
-```
-
-**Decision Logic:**
-
-```
-score ≥ 7.5  AND fact_accuracy ≥ 80%  →  "approved"
-score < 7.5  AND revision_count < 3   →  "revise" (quay lại Editor với feedback)
-                 revision_count >= 3  →  "approved_with_warning"
-```
+### Bước 8 — Tối ưu hóa SEO (SEO Agent)
+* **Nhiệm vụ:** Tăng khả năng tiếp cận của bài viết trên công cụ tìm kiếm Google.
+* **Quy trình:**
+  1. Sử dụng thuật toán Python thuần để tính toán điểm khả đọc (Flesch-Kincaid) và mật độ từ khóa SEO chính (`focus_keyword`) trong văn bản bài viết (đảm bảo đạt mật độ vàng 1.0% - 2.0%).
+  2. Kiểm tra cấu trúc tiêu đề (H1, H2, H3) xem có phân bổ đúng chuẩn SEO.
+  3. Gọi LLM sinh tự động: thẻ tiêu đề SEO (`meta_title`), đoạn mô tả ngắn thu hút (`meta_description`), URL thân thiện (`slug`) và các đề xuất cải thiện tối ưu thêm.
 
 ---
 
-### Bước 9 — Final Output
-
-```json
-{
-  "job_id":          "abc123",
-  "title":           "The Power of Multi-Agent AI Systems...",
-  "content":         "# The Power of Multi-Agent...\n\n...",
-  "word_count":      1487,
-  "seo_metadata": {
-    "title_tag":        "...",
-    "meta_description": "...",
-    "keywords":         [...]
-  },
-  "quality": {
-    "qa_score":         8.2,
-    "fact_accuracy":    83.3,
-    "readability":      67.2,
-    "revision_rounds":  1
-  },
-  "sources":         [...],
-  "cost_usd":        0.34,
-  "duration_seconds": 487,
-  "export_formats":  ["markdown", "html", "docx"]
-}
-```
-
----
-
-## 3. Error Handling & Edge Cases
-
-| Tình Huống                                  | Xử Lý                                                   |
-| --------------------------------------------- | --------------------------------------------------------- |
-| Tavily search trả về 0 kết quả            | Thử lại với broader query, fallback sang LLM knowledge |
-| Scraping bị block (403/captcha)              | Skip URL, tiếp tục với các URLs khác                 |
-| LLM API timeout                               | Retry 3 lần với exponential backoff                     |
-| Writer tạo content quá ngắn (< 60% target) | Re-run writer với explicit word count instruction        |
-| QA score quá thấp liên tục                | Sau 3 vòng: output với `warning: low_quality` flag    |
-| Budget exceeded                               | Dừng pipeline, notify user, lưu progress                |
-
----
-
-## 4. Thời Gian Ước Tính (1500-word article)
-
-| Bước           | Thời Gian           | Notes                            |
-| ---------------- | -------------------- | -------------------------------- |
-| Research         | 60-90s               | Phụ thuộc số URLs cần scrape |
-| Outline          | 10-15s               |                                  |
-| Parallel Writing | 40-60s               | 4 sections chạy đồng thời    |
-| Editing          | 20-30s               |                                  |
-| SEO              | 10-15s               |                                  |
-| Fact-checking    | 15-20s               |                                  |
-| QA               | 10-15s               |                                  |
-| **Total**  | **~3-4 phút** | Nếu không cần revision        |
-| With 1 revision  | ~5-6 phút           |                                  |
-| With 2 revisions | ~7-8 phút           |                                  |
+### Bước 9 — Đánh giá chất lượng cuối cùng & Định tuyến sửa chữa (QA Agent & Router)
+* **Nhiệm vụ:** Đưa ra quyết định thông duyệt bài viết cuối cùng dựa trên các chỉ số đo lường khoa học.
+* **Quy trình:**
+  1. **QA Agent Chấm Điểm:** Đánh giá bài viết dựa trên thang điểm 100 thông qua 5 tiêu chí: Sự rõ ràng mạch lạc (Clarity - 25%), Tính chính xác thông tin (Accuracy - 25%), Sự hấp dẫn lôi cuốn (Engagement - 20%), Điểm chuẩn SEO (SEO - 15%), và Sự tuân thủ định dạng mẫu bài viết (Format Adherence - 15%).
+  2. **Quyết định định tuyến (Coordinator Router):**
+     * **Phê duyệt (`approve`):** Nếu điểm số đạt trên 75 điểm và không có lỗi kiểm chứng nghiêm trọng -> Pipeline kết thúc thành công, lưu bài viết vào artifact `final_content`, đổi trạng thái Job sang `completed`.
+     * **Sửa chữa (`revise`):** Nếu điểm chất lượng thấp hoặc phát sinh cảnh báo sự thật nghiêm trọng -> Tăng số vòng sửa đổi (`revision_count`), trích xuất hướng dẫn sửa đổi cụ thể và tự động gửi trả luồng LangGraph quay về cho `editor` (hoặc `writer` nếu cần viết lại cả phần cụ thể).
+     * **Buộc thông qua có cảnh báo (`fail_with_warning`):** Nếu số vòng sửa đã vượt quá giới hạn tối đa đặt ra của hệ thống -> Hệ thống vẫn chấp nhận xuất bài viết kèm theo ghi nhận danh sách các cảnh báo chất lượng để tránh lặp vô hạn gây tốn kém tài nguyên.

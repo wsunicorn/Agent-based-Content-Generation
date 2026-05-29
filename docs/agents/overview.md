@@ -1,168 +1,87 @@
-# Tổng Quan Các AI Agent
+# Tổng Quan Các AI Agent (AI Agents Overview)
 
-## Danh Sách Agent
-
-| Agent | File | LLM | Nhiệm Vụ Chính |
-|-------|------|-----|----------------|
-| Coordinator | [coordinator-agent.md](./coordinator-agent.md) | — | Điều phối toàn bộ pipeline |
-| Research | [research-agent.md](./research-agent.md) | gemini-2.5-flash | Web search, scrape, extract facts |
-| Outline | [outline-agent.md](./outline-agent.md) | gemini-2.5-flash | Tạo cấu trúc bài viết |
-| Writer | [writer-agent.md](./writer-agent.md) | gemini-2.5-flash | Viết nội dung (Parallel) |
-| Editor | [editor-agent.md](./editor-agent.md) | gemini-2.5-flash | Chỉnh sửa grammar, clarity |
-| SEO | [seo-agent.md](./seo-agent.md) | gemini-2.5-flash | Tối ưu keywords, metadata |
-| Fact-Checker | [fact-checker-agent.md](./fact-checker-agent.md) | gemini-2.5-flash | Xác minh claims |
-| QA | [qa-agent.md](./qa-agent.md) | gemini-2.5-flash | Chấm điểm, approve/revise |
+Tài liệu này cung cấp sơ đồ tương tác, danh sách nhiệm vụ chi tiết và nguyên lý hoạt động của 12 AI Agent chuyên biệt phối hợp hoạt động trong hệ thống **Domain LLM Assistant**.
 
 ---
 
-## Agent Interaction Map
+## 1. Bản Đồ Tương Tác Các Tác Nhân (Agent Interaction Map)
+
+Dưới đây là luồng xử lý và trao đổi dữ liệu thời gian thực giữa các tác nhân thông qua LangGraph State Machine:
 
 ```
-                    ┌─────────────────┐
-                    │   Coordinator   │
-                    │  (Orchestrator) │
-                    └────────┬────────┘
-                             │ manages state, routes tasks
-                    ┌────────▼────────┐
-                    │ Research Agent  │
-                    │ INPUT:  topic   │
-                    │ OUTPUT: dossier │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  Outline Agent  │
-                    │ INPUT:  dossier │
-                    │ OUTPUT: outline │
-                    └────────┬────────┘
-                             │ splits into N sections
-              ┌──────────────┼──────────────┐
-              │              │              │
-    ┌─────────▼──┐  ┌────────▼──┐  ┌───────▼──────┐
-    │Intro Writer│  │Body Writer│  │Conclu. Writer│
-    └─────────┬──┘  └────────┬──┘  └───────┬──────┘
-              └──────────────┼──────────────┘
-                             │ join (merged draft)
-                    ┌────────▼────────┐
-                    │  Editor Agent   │
-                    │ INPUT:  draft   │
-                    │ OUTPUT: edited  │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │   SEO Agent     │
-                    │ INPUT:  edited  │
-                    │ OUTPUT: seo_pkg │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │ Fact-Checker    │
-                    │ INPUT:  content │
-                    │ OUTPUT: report  │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │    QA Agent     │───► score ≥ 7.5 → DONE
-                    │ INPUT:  all     │
-                    │ OUTPUT: score   │───► score < 7.5  → Editor (max 3x)
-                    └─────────────────┘
+                            ┌─────────────────┐
+                            │   Coordinator   │ ← Khởi tạo tham số đầu vào
+                            └────────┬────────┘
+                                     │
+                            ┌────────▼────────┐
+                            │ Image Research  │ ← Tìm kiếm hình ảnh Wikimedia
+                            └────────┬────────┘
+                                     │
+                            ┌────────▼────────┐
+                            │ Research Agent  │ ← Tìm kiếm tài liệu, cào web Tavily
+                            └────────┬────────┘
+                                     │
+                            ┌────────▼────────┐
+                            │  Outline Agent  │ ← Thiết lập cấu trúc dàn bài
+                            └────────┬────────┘
+                                     │ (Chờ duyệt và phân bổ H2/H3)
+                            ┌────────▼────────┐
+                            │  Writer Agent   │ ← Lập kế hoạch phân chia section
+                            └────────┬────────┘
+                                     │ (Rẽ nhánh viết song song bằng Celery)
+               ┌─────────────────────┼─────────────────────┐
+               │                     │                     │
+      ┌────────▼────────┐   ┌────────▼────────┐   ┌────────▼────────┐
+      │ Section Writer  │   │ Section Writer  │   │ Section Writer  │ (Section 1..N)
+      └────────┬────────┘   └────────┬────────┘   └────────┬────────┘
+               │                     │                     │
+               └─────────────────────┼─────────────────────┘
+                                     │ (Ghép nối và tự động chèn ảnh)
+                            ┌────────▼────────┐
+                            │   Join Draft    │
+                            └────────┬────────┘
+                                     │
+                            ┌────────▼────────┐
+                            │  Editor Agent   │ ← Biên tập, mượt hóa văn phong
+                            └────────┬────────┘
+                                     │
+                            ┌────────▼────────┐
+                            │  Coord Router   │ ◄───────┐
+                            └────────┬────────┘         │
+             ┌───────────────────────┼──────────────────┼────┐
+             ▼                       ▼                  ▼    │ (Nếu QA chấm dưới 75)
+      ┌──────────────┐        ┌──────────────┐   ┌───────────┴──┐
+      │ Fact-Checker │        │  SEO Agent   │   │   QA Agent   │
+      │ (Kiểm chứng) │        │ (Tối ưu SEO) │   │ (Đánh giá QA)│
+      └──────────────┘        └──────────────┘   └──────────────┘
 ```
 
 ---
 
-## Base Agent Class
+## 2. Danh Sách Chi Tiết 12 AI Agent
 
-Tất cả agents kế thừa từ `BaseAgent`:
-
-```python
-# apps/agents/base.py
-
-class BaseAgent:
-    name: str                    # Agent identifier
-    model: str = "gemini-2.5-flash"  # Google Gemini model
-    max_retries: int = 3         # Retry on API failure
-    timeout: int = 60            # Seconds
-    request_delay: float = 6.0   # Delay between calls (free tier: 10 RPM)
-
-    def run(self, state: PipelineState) -> PipelineState:
-        """
-        Nhận state, xử lý, trả về updated state.
-        Ghi log vào AgentRun model.
-        Publish progress event qua Redis.
-        """
-        raise NotImplementedError
-
-    def _call_llm(self, messages: list, output_schema=None) -> Any:
-        """Gọi Gemini API với retry logic và rate limit delay."""
-        ...
-
-    def _log_run(self, job_id, input_data, output_data, tokens, duration):
-        """Ghi AgentRun record vào DB."""
-        ...
-
-    def _publish_progress(self, job_id, message, progress_pct):
-        """Push WebSocket event qua Redis Channel."""
-        ...
-```
+| Tên Agent | Tệp Mã Nguồn | LLM Mặc Định | Nhiệm Vụ & Vai Trò Chính |
+| :--- | :--- | :--- | :--- |
+| **Coordinator** | `apps/agents/coordinator.py` | — (Python) | Đọc cấu hình đầu vào, thiết lập các ranh giới chất lượng (`quality_mode`), chuẩn hóa tham số. |
+| **Image Research** | `apps/agents/image_research.py`| — (Python API) | Tìm kiếm ảnh liên quan từ Wikimedia Commons, trích xuất giấy phép sử dụng (`license`) và bản quyền tác giả. |
+| **Research** | `apps/agents/research.py` | `qwen3:8b` / Gemini | Gửi truy vấn thông minh đến Tavily Search, scrape nội dung thô và tổng hợp các facts đắt giá. |
+| **Outline** | `apps/agents/outline.py` | `qwen2.5:7b` / Gemini| Chọn template mẫu theo `content_type` và lập dàn ý chi tiết các phần, phân bổ từ mục tiêu. |
+| **Writer** | `apps/agents/writer.py` | `qwen3:8b` / Gemini | Lập kế hoạch viết bài, chuyển đổi dàn bài thành danh sách các nhiệm vụ viết riêng biệt (`writer_tasks`). |
+| **Section Writer** | `apps/agents/section_writer.py`| `qwen3:8b` / Gemini | Viết nội dung thô cho duy nhất một phần được giao theo đúng giọng văn, từ khóa và đối tượng độc giả. |
+| **Join Draft** | `apps/agents/join_draft.py` | — (Python) | Ghép nối các phần thô do các section writers viết, tự động tính toán vị trí chèn ảnh minh họa thích hợp. |
+| **Editor** | `apps/agents/editor.py` | `qwen3:8b` / Gemini | Chỉnh sửa ngữ pháp, đồng bộ phong cách viết, cắt bỏ từ rác dư thừa và tối ưu hóa số từ mục tiêu. |
+| **Coord Router** | `apps/agents/coordinator.py` | — (Python) | Đóng vai trò là "Bộ điều khiển trung tâm" sau các cổng chất lượng, phân tích lỗi và định tuyến các chu kỳ sửa bài. |
+| **Fact-Checker** | `apps/agents/fact_checker.py` | `qwen3:8b` / Gemini | Trích xuất các tuyên bố thực tế trong bài viết và xác minh tính chính xác so với tài liệu nghiên cứu gốc. |
+| **SEO** | `apps/agents/seo.py` | `qwen2.5:7b` / Gemini| Tính điểm SEO (Keyword Density, Heading chuẩn, Alt ảnh) và tự động sinh Meta Title/Description, URL Slug. |
+| **QA** | `apps/agents/qa.py` | `qwen3:8b` / Gemini | Chấm điểm bài viết trên thang điểm 100 dựa theo 5 tiêu chí khoa học, quyết định thông duyệt bài hay sửa đổi. |
 
 ---
 
-## Shared Data Schemas
+## 3. Lớp Nền Tảng Tác Nhân (`BaseAgent` Class)
 
-```python
-# apps/pipeline/state.py
+Tất cả các Agent trong thư mục `apps/agents/` đều bắt buộc phải kế thừa lớp cơ sở `BaseAgent` (`apps/agents/base.py`) để được kế thừa các cơ chế hạ tầng mạnh mẽ:
 
-@dataclass
-class ResearchDossier:
-    facts:       list[str]
-    statistics:  list[dict]    # {value, context, source}
-    quotes:      list[dict]    # {text, author, source_url}
-    sources:     list[dict]    # {url, title, credibility_score}
-    subtopics:   list[str]
-    keywords:    list[str]
-
-@dataclass
-class OutlineSection:
-    id:             str
-    type:           str          # introduction | body | conclusion
-    heading:        str | None
-    heading_level:  str | None   # H2 | H3
-    brief:          str
-    key_points:     list[str]
-    target_words:   int
-    sources_to_use: list[str]
-
-@dataclass
-class Outline:
-    title:       str
-    sections:    list[OutlineSection]
-    total_words: int
-
-@dataclass
-class SEOPackage:
-    title_tag:          str
-    meta_description:   str
-    focus_keyword:      str
-    secondary_keywords: list[str]
-    keyword_density:    dict[str, float]
-    readability_score:  float
-    readability_grade:  str
-    heading_structure:  dict
-    optimized_content:  str
-    recommendations:    list[str]
-
-@dataclass
-class FactReport:
-    total_claims:   int
-    verified:       int
-    unverified:     int
-    claims:         list[dict]
-    accuracy_score: float
-
-@dataclass
-class QAReport:
-    overall_score:    float
-    dimension_scores: dict[str, float]
-    decision:         str           # approved | revise | approved_with_warning
-    feedback:         str
-    revision_count:   int
-```
+1. **Định tuyến Mô Hình Thông Minh (`_select_provider_name`):** Tự động phát hiện chế độ hoạt động (`LLM_MODE`) và chuyển hướng nhiệm vụ sang Ollama Local (đối với viết prose văn bản dài) hoặc Google Gemini (đối với định dạng JSON cấu trúc).
+2. **Tự Động Thử Lại Có Giãn Cách (`tenacity` retry wrapper):** Tự động gọi lại LLM khi gặp lỗi kết nối hoặc rate-limit, áp dụng cơ chế giãn cách tăng lũy thừa (`wait_exponential`) tối đa 3 lần.
+3. **Cơ Chế Khôi Phục Fallback:** Khi Ollama cục bộ bị quá tải tài nguyên dẫn đến treo dịch vụ, tác nhân sẽ tự động chuyển hướng cuộc gọi sang Gemini free-tier để đảm bảo bài viết hoàn thành trọn vẹn.
+4. **Theo Dõi Tài Nguyên Thời Gian Thực (`_track_usage`):** Lưu trữ chính xác số lần gọi LLM của từng tác nhân theo thời gian thực và ghi nhận vào mô hình `AgentRun` trong cơ sở dữ liệu.

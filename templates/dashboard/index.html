@@ -1144,6 +1144,71 @@ document.getElementById('job-form').addEventListener('submit', async (e) => {
   }
 });
 
+/* ── Markdown → HTML (simple, no dependency) ── */
+function mdToHtml(md) {
+  if (!md) return '<p style="color:var(--text-3)">No content available.</p>';
+  let html = md
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    // headings
+    .replace(/^######\s+(.+)$/gm, '<h6>$1</h6>')
+    .replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>')
+    .replace(/^####\s+(.+)$/gm,  '<h4>$1</h4>')
+    .replace(/^###\s+(.+)$/gm,   '<h3>$1</h3>')
+    .replace(/^##\s+(.+)$/gm,    '<h2>$1</h2>')
+    .replace(/^#\s+(.+)$/gm,     '<h1>$1</h1>')
+    // hr
+    .replace(/^[-*_]{3,}\s*$/gm, '<hr>')
+    // blockquote
+    .replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+    // code blocks
+    .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+    // inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // bold+italic
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    // bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // italic
+    .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+    // images
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
+    // links
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // lists
+  const lines = html.split('\n');
+  const out = [];
+  let inUL = false, inOL = false;
+  for (const line of lines) {
+    const ul = /^[-*+]\s+(.+)/.exec(line);
+    const ol = /^\d+\.\s+(.+)/.exec(line);
+    if (ul) {
+      if (!inUL) { out.push('<ul>'); inUL = true; }
+      out.push('<li>' + ul[1] + '</li>');
+    } else if (ol) {
+      if (!inOL) { out.push('<ol>'); inOL = true; }
+      out.push('<li>' + ol[1] + '</li>');
+    } else {
+      if (inUL) { out.push('</ul>'); inUL = false; }
+      if (inOL) { out.push('</ol>'); inOL = false; }
+      out.push(line);
+    }
+  }
+  if (inUL) out.push('</ul>');
+  if (inOL) out.push('</ol>');
+  html = out.join('\n');
+
+  // paragraphs — wrap double-newline blocks
+  html = html.replace(/(?<![>\n])\n{2,}(?![\s<])/g, '\n\n')
+             .split(/\n{2,}/)
+             .map(b => b.trim())
+             .filter(Boolean)
+             .map(b => /^<[h1-6ulolprebh]/.test(b) ? b : '<p>' + b.replace(/\n/g,'<br>') + '</p>')
+             .join('\n');
+
+  return html;
+}
+
 /* ─────────────────────────────────────────────────────────────────────
    Tracking
 ───────────────────────────────────────────────────────────────────────── */
@@ -1311,18 +1376,25 @@ async function fetchAndShowResult(jobId, qaScore) {
 
   try {
     const r = await fetch('/api/jobs/' + jobId + '/artifacts/final_content/');
+    const viewer = document.getElementById('content-preview');
     if (r.ok) {
       const art = await r.json();
       const wc = art.word_count || '—';
       document.getElementById('word-count-val').textContent = typeof wc === 'number' ? wc.toLocaleString() : wc;
-      const preview = (art.content_text || '').slice(0, 2000);
-      document.getElementById('content-preview').textContent =
-        preview + (art.content_text && art.content_text.length > 2000 ? '\n\n… (truncated — open full article for complete view)' : '');
+      const text = art.content_text || '';
+      viewer.dataset.raw = text;
+      
+      const displayTxt = text.slice(0, 2000) + (text.length > 2000 ? '\n\n… (truncated — open full article for complete view)' : '');
+      viewer.innerHTML = mdToHtml(displayTxt);
+      viewer.classList.add('html-mode');
     } else {
-      document.getElementById('content-preview').textContent = 'Content saved. Open the full article to read it.';
+      viewer.innerHTML = '<p style="color:var(--text-3)">Content saved. Open the full article to read it.</p>';
+      viewer.classList.add('html-mode');
     }
   } catch {
-    document.getElementById('content-preview').textContent = 'Content saved. Open the full article to read it.';
+    const viewer = document.getElementById('content-preview');
+    viewer.innerHTML = '<p style="color:var(--text-3)">Content saved. Open the full article to read it.</p>';
+    viewer.classList.add('html-mode');
   }
 
   let score = qaScore;
@@ -1772,7 +1844,7 @@ function toggleEdit() {
   const btn     = document.getElementById('edit-btn');
   const isEdit  = editor.style.display !== 'none';
   if (isEdit) { cancelEdit(); return; }
-  _editOriginal = viewer.textContent;
+  _editOriginal = viewer.dataset.raw || viewer.textContent;
   editor.value  = _editOriginal;
   editor.style.display = 'block';
   viewer.style.display = 'none';
@@ -1810,7 +1882,10 @@ async function saveEdit() {
     });
     if (resp.ok) {
       const d = await resp.json();
-      document.getElementById('content-preview').textContent = text;
+      const viewer = document.getElementById('content-preview');
+      viewer.dataset.raw = text;
+      viewer.innerHTML = mdToHtml(text);
+      viewer.classList.add('html-mode');
       document.getElementById('word-count-val').textContent = d.word_count.toLocaleString();
       cancelEdit();
       tlog('Content saved — ' + d.word_count + ' words', 'success');

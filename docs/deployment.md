@@ -1,486 +1,184 @@
-# Deployment Guide
+# Hướng Dẫn Kích Hoạt & Cài Đặt (Deployment & Setup Guide)
 
-## 1. Development Setup (Local)
+Tài liệu này cung cấp hướng dẫn từng bước chi tiết để thiết lập môi trường phát triển cục bộ (Local Development) và vận hành hệ thống **Domain LLM Assistant** trên nền tảng Windows, bao gồm cả thiết lập dịch vụ mô hình ngôn ngữ cục bộ (Ollama Local LLMs).
 
-### Prerequisites
+---
 
+## 1. Yêu Cầu Trước Khi Cài Đặt (Prerequisites)
+
+Hãy đảm bảo rằng máy tính của bạn đã được cài đặt sẵn các thành phần sau:
+
+1. **Python 3.11.x hoặc 3.12.x** (Khuyến nghị sử dụng Python 3.11).
+2. **PostgreSQL 16** (Máy chủ database, chạy cổng mặc định `5432` hoặc `5433`).
+3. **Redis 7** (Hàng đợi tác vụ và lưu cache, chạy cổng mặc định `6379`).
+4. **Ollama** (Ứng dụng chạy LLM cục bộ, tải tại [ollama.com](https://ollama.com)).
+5. **Git** (Để clone mã nguồn).
+
+---
+
+## 2. Thiết Lập Môi Trường Cục Bộ (Step-by-Step Local Setup)
+
+### Bước 1 — Tải mã nguồn và thiết lập môi trường ảo Python
+Mở terminal (PowerShell hoặc Command Prompt) trên Windows và thực thi:
+
+```powershell
+# Di chuyển đến thư mục dự án
+cd D:\StudyDocument\DataPlatforms\Project
+
+# Tạo môi trường ảo cách ly (.venv)
+python -m venv .venv
+
+# Kích hoạt môi trường ảo
+.venv\Scripts\Activate.ps1
 ```
-Python 3.12+
-Docker Desktop
-Git
-```
 
-### Step 1 — Clone & Setup
+---
 
-```bash
-git clone https://github.com/your-org/content-pipeline.git
-cd content-pipeline
+### Bước 2 — Cài đặt thư viện dependencies và Playwright Browser
+Cài đặt tất cả các thư viện cần thiết cho môi trường phát triển:
 
-# Create virtual environment
-python -m venv venv
-venv\Scripts\activate       # Windows
-source venv/bin/activate    # Mac/Linux
+```powershell
+# Cập nhật công cụ pip lên bản mới nhất
+python -m pip install --upgrade pip
 
-# Install dependencies
+# Cài đặt toàn bộ dependencies phát triển
 pip install -r requirements/development.txt
 
-# Install Playwright browsers
+# Cài đặt trình duyệt Chromium ẩn phục vụ cào dữ liệu (Playwright)
 playwright install chromium
 ```
 
-### Step 2 — Environment Variables
+---
 
-Tạo file `.env` tại root:
+### Bước 3 — Cấu hình tệp biến môi trường `.env`
+Sao chép cấu hình mẫu và mở tệp `.env` ở thư mục gốc dự án để điền thông số chính xác:
 
-```bash
-# Django
-DJANGO_SECRET_KEY=your-secret-key-min-50-chars
-DJANGO_DEBUG=True
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+```powershell
+copy .env.example .env
+```
 
-# Database
+#### Các biến môi trường chính trong `.env` cần cấu hình:
+
+```env
+# ----- Cấu hình Django -----
+SECRET_KEY=your-custom-django-secret-key-min-50-characters
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# ----- Cơ sở dữ liệu và Cache (Postgres & Redis) -----
+# Thay user, pass, port tương ứng với cấu hình Postgres trên máy của bạn
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/content_pipeline
-
-# Redis
 REDIS_URL=redis://localhost:6379/0
 
-# Google Gemini (lấy tại https://aistudio.google.com/app/apikey)
+# ----- Cấu hình LLM Providers -----
+# Chế độ LLM: cheap (ưu tiên Ollama) | balanced (Ollama và Gemini bổ trợ) | quality (tất cả dùng Gemini)
+LLM_MODE=balanced
+LLM_PROVIDER=hybrid
+LOCAL_LLM_PROVIDER=ollama
+STRUCTURED_LLM_PROVIDER=gemini
+
+# ----- Google Gemini API Key (Không bắt buộc nếu dùng chế độ cheap thuần Ollama) -----
 GOOGLE_API_KEY=AIzaSy...
+GEMINI_REQUEST_DELAY=6.5  # Giãn cách 6.5s để tránh chạm trần rate-limit 10 RPM free tier
 
-# Tavily Search
+# ----- Ollama Local Config -----
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_REASONING_MODEL=qwen3:8b
+OLLAMA_FAST_MODEL=qwen2.5:3b
+OLLAMA_EMBED_MODEL=nomic-embed-text-v2-moe
+
+# ----- Tìm kiếm Tavily Search API -----
+ENABLE_WEB_SEARCH=True
 TAVILY_API_KEY=tvly-...
-
-# Optional: Rate Limit Protection
-GEMINI_REQUEST_DELAY_SECONDS=6.5   # 10 RPM = 1 req/6s
-MAX_JOBS_PER_HOUR=10
 ```
 
-### Step 3 — Docker Compose (Infrastructure Only)
+---
+
+### Bước 4 — Kích hoạt các mô hình cục bộ trên Ollama
+Đảm bảo phần mềm Ollama đã được bật trong thanh Taskbar của bạn. Chạy các lệnh sau để tải về máy các mô hình cần thiết:
 
 ```bash
-# Start PostgreSQL + Redis only (Django chạy ngoài Docker khi dev)
-docker compose -f docker-compose.dev.yml up -d
-
-# Verify
-docker compose ps
+ollama pull qwen2.5:7b
+ollama pull qwen3:8b
+ollama pull nomic-embed-text-v2-moe
 ```
 
-**docker-compose.dev.yml:**
-```yaml
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: content_pipeline
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-volumes:
-  postgres_data:
+Kiểm tra xem hệ thống đã đủ các mô hình yêu cầu chưa thông qua Django command tích hợp:
+```powershell
+python manage.py check_ollama_models
 ```
 
-### Step 4 — Django Setup
+---
 
-```bash
-# Migrations
+### Bước 5 — Chạy Migrations và thiết lập ban đầu
+Khởi tạo cấu trúc các bảng dữ liệu trong PostgreSQL:
+
+```powershell
+# Khởi tạo migrations database
 python manage.py migrate
 
-# Create superuser
+# Tạo tài khoản quản trị Admin tối cao
 python manage.py createsuperuser
-
-# Collect static files
-python manage.py collectstatic --noinput
-
-# Load seed data (optional)
-python manage.py loaddata fixtures/content_templates.json
-```
-
-### Step 5 — Run All Services
-
-Cần 3 terminal windows:
-
-**Terminal 1 — Django (ASGI + WebSocket):**
-```bash
-daphne -p 8000 config.asgi:application
-```
-
-**Terminal 2 — Celery Worker:**
-```bash
-celery -A config worker -l info -c 4
-# -c 4 = 4 concurrent workers (đủ cho parallel writers)
-```
-
-**Terminal 3 — Celery Beat (Scheduled tasks, optional):**
-```bash
-celery -A config beat -l info
-```
-
-**Access:**
-- App: http://localhost:8000
-- Admin: http://localhost:8000/admin/
-- API: http://localhost:8000/api/v1/
-
----
-
-## 2. Production Setup (Docker)
-
-### docker-compose.yml (Production)
-
-```yaml
-version: "3.9"
-
-services:
-
-  django:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: daphne -b 0.0.0.0 -p 8000 config.asgi:application
-    volumes:
-      - static_files:/app/staticfiles
-      - media_files:/app/media
-    env_file: .env.production
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
-
-  celery:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A config worker -l info -c 4 --without-gossip --without-mingle
-    env_file: .env.production
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
-
-  celery_beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    env_file: .env.production
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    env_file: .env.production
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      - static_files:/app/staticfiles
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - django
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
-  redis_data:
-  static_files:
-  media_files:
 ```
 
 ---
 
-### Dockerfile
+## 3. Khởi Chạy Hệ Thống (Running Demos & Development)
 
-```dockerfile
-FROM python:3.12-slim
+Để hệ thống hoạt động hoàn chỉnh (Web UI + Async Pipeline), ta cần khởi chạy đồng thời các dịch vụ sau.
 
-# System dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+### Cách 1: Sử dụng tệp khởi chạy nhanh tự động `start.bat` (Khuyến nghị trên Windows)
+Tại thư mục gốc của dự án, bạn chỉ cần click đúp hoặc chạy file `start.bat` từ PowerShell:
 
-WORKDIR /app
-
-# Python dependencies
-COPY requirements/production.txt .
-RUN pip install --no-cache-dir -r production.txt
-
-# Playwright
-RUN playwright install chromium --with-deps
-
-# Copy project
-COPY . .
-
-# Collect static
-RUN python manage.py collectstatic --noinput --settings=config.settings.production
-
-# Non-root user
-RUN useradd -m appuser && chown -R appuser /app
-USER appuser
-
-EXPOSE 8000
+```powershell
+.\start.bat
 ```
+
+Script này sẽ tự động phát hiện môi trường, kích hoạt `.venv`, kiểm tra PostgreSQL/Redis, chạy migrations, tự khởi tạo 2 terminal phụ chạy song song cho Celery Worker và Daphne ASGI Server, đồng thời tự động mở trình duyệt web hiển thị Dashboard tại địa chỉ `http://127.0.0.1:8000/`.
 
 ---
 
-### Nginx Config
+### Cách 2: Chạy thủ công trên 3 cửa sổ terminal riêng biệt
 
-```nginx
-# nginx/nginx.conf
-
-upstream django {
-    server django:8000;
-}
-
-server {
-    listen 80;
-    server_name yourdomain.com;
-
-    # Static files
-    location /static/ {
-        alias /app/staticfiles/;
-        expires 30d;
-    }
-
-    # WebSocket
-    location /ws/ {
-        proxy_pass http://django;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 300s;
-    }
-
-    # API & App
-    location / {
-        proxy_pass http://django;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
+#### Cửa sổ 1 — Daphne (ASGI Web và WebSocket Server):
+```powershell
+.venv\Scripts\Activate.ps1
+daphne -b 127.0.0.1 -p 8000 config.asgi:application
 ```
+
+#### Cửa sổ 2 — Celery Worker (Xử lý các tác vụ đa tác nhân LangGraph chạy nền):
+```powershell
+.venv\Scripts\Activate.ps1
+celery -A config worker -l info -P solo
+```
+*Lưu ý quan trọng:* Đối số `-P solo` là bắt buộc trên hệ điều hành Windows vì Windows không hỗ trợ hàm `fork` luồng con của Unix. Khi bạn sửa đổi bất kỳ mã nguồn Python nào trong thư mục `apps/agents/`, bạn bắt buộc phải tắt đi (Ctrl+C) và bật lại Celery Worker để mã nguồn mới được nạp vào.
+
+#### Cửa sổ 3 — Ollama Server:
+Đảm bảo dịch vụ Ollama cục bộ đang hoạt động để phản hồi kịp thời các truy vấn sinh văn bản của các agent.
 
 ---
 
-### Deploy Commands
+## 4. Kiểm tra hoạt động hệ thống (Health Check Diagnostics)
+
+Bạn có thể chạy các lệnh kiểm tra nhanh để đảm bảo các dịch vụ liên kết hoàn toàn khỏe mạnh:
 
 ```bash
-# Build images
-docker compose build
+# Kiểm tra dịch vụ Web có phản hồi liveness probe
+curl http://localhost:8000/api/health/
 
-# Start services
-docker compose up -d
-
-# Run migrations
-docker compose exec django python manage.py migrate
-
-# Create superuser
-docker compose exec django python manage.py createsuperuser
-
-# Check logs
-docker compose logs -f django
-docker compose logs -f celery
-```
-
----
-
-## 3. Requirements Files
-
-### requirements/base.txt
-```txt
-# Django
-django==5.1.*
-djangorestframework==3.15.*
-channels==4.1.*
-channels-redis==4.2.*
-daphne==4.1.*
-django-cors-headers==4.4.*
-django-environ==0.11.*
-django-celery-results==2.5.*
-
-# AI/ML
-langchain==0.3.*
-langchain-google-genai==2.0.*
-langgraph==0.2.*
-google-generativeai==0.8.*
-
-# Async
-celery==5.4.*
-redis==5.1.*
-
-# Database
-psycopg2-binary==2.9.*
-
-# Scraping
-tavily-python==0.4.*
-beautifulsoup4==4.12.*
-lxml==5.3.*
-playwright==1.47.*
-
-# Export
-python-docx==1.1.*
-markdown2==2.5.*
-weasyprint==62.*
-
-# Utils
-pydantic==2.9.*
-httpx==0.27.*
-tenacity==9.0.*
-python-slugify==8.0.*
-```
-
-### requirements/development.txt
-```txt
--r base.txt
-
-# Testing
-pytest==8.3.*
-pytest-django==4.9.*
-pytest-asyncio==0.24.*
-pytest-cov==5.0.*
-factory-boy==3.3.*
-responses==0.25.*
-
-# Dev tools
-django-debug-toolbar==4.4.*
-ipython==8.28.*
-black==24.*
-isort==5.13.*
-flake8==7.1.*
-```
-
-### requirements/production.txt
-```txt
--r base.txt
-gunicorn==23.*
-sentry-sdk==2.*
-```
-
----
-
-## 4. Environment Variables Reference
-
-```bash
-# ===== REQUIRED =====
-
-DJANGO_SECRET_KEY=           # Min 50 chars random string
-DJANGO_DEBUG=                # True (dev) / False (prod)
-DJANGO_ALLOWED_HOSTS=        # Comma-separated: localhost,yourdomain.com
-
-DATABASE_URL=                # postgresql://user:pass@host:5432/dbname
-REDIS_URL=                   # redis://host:6379/0
-
-GOOGLE_API_KEY=              # AIzaSy... (Google AI Studio — free)
-TAVILY_API_KEY=              # tvly-...
-
-# ===== OPTIONAL =====
-
-GEMINI_REQUEST_DELAY_SECONDS=6.5   # Delay giữa LLM calls (10 RPM free tier)
-MAX_DAILY_LLM_REQUESTS=200         # Warn khi gần 250 RPD limit
-MAX_JOBS_PER_HOUR_PER_USER=10      # Rate limit
-CELERY_WORKER_CONCURRENCY=4        # Parallel Celery workers
-LANGGRAPH_CHECKPOINT_TTL_DAYS=7    # How long to keep checkpoints
-
-# PostgreSQL (if not using DATABASE_URL)
-POSTGRES_DB=content_pipeline
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=...
-POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
-
-# Sentry (production error tracking)
-SENTRY_DSN=https://...@sentry.io/...
-```
-
----
-
-## 5. Health Checks
-
-```bash
-# Django app alive?
-curl http://localhost:8000/health/
-
-# Celery workers alive?
+# Kiểm tra xem Celery worker có kết nối và online không
 celery -A config inspect ping
-
-# Redis connected?
-redis-cli ping
-
-# Database connected?
-python manage.py dbshell -c "SELECT 1;"
 ```
 
-**Health endpoint response:**
+Phản hồi chuẩn của API health check khi mọi dịch vụ (DB, Redis, Worker) hoạt động trơn tru:
 ```json
 {
-  "status":   "healthy",
-  "database": "connected",
-  "redis":    "connected",
-  "celery":   { "workers": 1, "active_tasks": 2 },
-  "version":  "1.0.0"
+  "status": "ok",
+  "timestamp": "2026-05-29T14:38:00.123456Z",
+  "db": true,
+  "redis": true,
+  "worker": true,
+  "worker_count": 1
 }
-```
-
----
-
-## 6. Django Admin Setup
-
-Django Admin tự động có sẵn tại `/admin/`. Customize để monitor pipeline:
-
-```python
-# apps/jobs/admin.py
-
-@admin.register(Job)
-class JobAdmin(admin.ModelAdmin):
-    list_display    = ["topic_short", "status", "content_type",
-                       "final_qa_score", "cost_usd", "created_at"]
-    list_filter     = ["status", "content_type", "created_at"]
-    search_fields   = ["topic", "id"]
-    readonly_fields = ["id", "cost_usd", "total_tokens", "duration_seconds",
-                       "created_at", "started_at", "completed_at"]
-
-    # Color-coded status
-    def status_colored(self, obj):
-        colors = {
-            "completed": "green",
-            "failed": "red",
-            "running": "orange",
-            "pending": "gray"
-        }
-        color = colors.get(obj.status, "black")
-        return format_html(
-            '<span style="color: {}">{}</span>', color, obj.status
-        )
-
-@admin.register(AgentRun)
-class AgentRunAdmin(admin.ModelAdmin):
-    list_display = ["agent_name", "status", "duration_ms", "cost_usd", "started_at"]
-    list_filter  = ["agent_name", "status"]
-    raw_id_fields = ["job"]
 ```

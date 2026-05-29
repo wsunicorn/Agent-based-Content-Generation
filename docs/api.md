@@ -1,466 +1,266 @@
-# API Reference
+# Danh sách Tài liệu API (API Reference)
 
-## 1. Base URL
+Tài liệu này mô tả chi tiết tất cả các điểm cuối API (REST API Endpoints) và kết nối thời gian thực WebSockets được cung cấp bởi máy chủ web **Domain LLM Assistant** để quản lý các tác vụ tạo nội dung.
+
+---
+
+## 1. Đường Dẫn Cơ Bản (Base URL)
 
 ```
-Development:   http://localhost:8000/api/v1/
-Production:    https://yourdomain.com/api/v1/
-WebSocket:     ws://localhost:8000/ws/jobs/{job_id}/
+HTTP REST API:    http://localhost:8000/api/
+WebSocket API:    ws://localhost:8000/ws/jobs/{job_id}/
+```
+
+*Lưu ý:* Dự án sử dụng cấu hình URL phẳng bắt đầu bằng `/api/` trực tiếp tại thư mục gốc của đường dẫn web (không sử dụng tiền tố `/api/v1/`).
+
+---
+
+## 2. Phương thức Xác Thực (Authentication)
+
+Trong quá trình phát triển cục bộ và tích hợp giao diện HTML Dashboard, ứng dụng sử dụng phương thức xác thực **Django Session Authentication** mặc định. 
+
+Tất cả các tác vụ thay đổi dữ liệu (`POST`, `PATCH`, `DELETE`) từ phía client bắt buộc phải đính kèm tiêu đề chứa khóa chống giả mạo yêu cầu chéo CSRF:
+
+```http
+X-CSRFToken: [token_value_from_cookies]
 ```
 
 ---
 
-## 2. Authentication
+## 3. Các API Quản Lý Nhiệm Vụ (Jobs API)
 
-DRF Token Authentication:
-
-```http
-POST /api/v1/auth/token/
-Content-Type: application/json
-
-{
-  "username": "user@example.com",
-  "password": "password"
-}
-
-→ Response:
-{
-  "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
-}
-```
-
-Tất cả requests cần header:
-```http
-Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
-```
-
----
-
-## 3. Jobs API
-
-### POST /api/v1/jobs/
-**Tạo job mới và start pipeline**
-
-**Request:**
+### 3.1 POST `/api/jobs/` — Tạo nhiệm vụ và khởi chạy Pipeline
+* **Mô tả:** Tiếp nhận tham số yêu cầu bài viết mới từ người dùng, lưu vào DB và kích hoạt tác vụ Celery chạy nền.
+* **Đầu vào mẫu (JSON):**
 ```json
 {
-  "topic":          "Benefits of Multi-Agent AI Systems",
-  "audience":       "Tech professionals and AI enthusiasts",
-  "tone":           "informative, authoritative",
-  "content_type":   "blog_post",
-  "target_words":   1500,
-  "language":       "en",
-  "focus_keywords": ["multi-agent AI", "LangGraph", "AI automation"],
-  "max_budget_usd": 2.00,
-  "num_sources":    10
-}
-```
-
-**Validation:**
-- `topic`: required, 10–500 chars
-- `target_words`: 500–5000
-- `content_type`: `blog_post | report | article`
-- `max_budget_usd`: 0.10–10.00
-- `focus_keywords`: max 5 keywords
-
-**Response 201:**
-```json
-{
-  "id":           "550e8400-e29b-41d4-a716-446655440000",
-  "status":       "pending",
-  "topic":        "Benefits of Multi-Agent AI Systems",
+  "title": "Tương lai của AI trong Y tế",
+  "topic": "Những ứng dụng thực tế và triển vọng của trí tuệ nhân tạo (AI) trong chẩn đoán y khoa đến năm 2030.",
   "content_type": "blog_post",
-  "target_words": 1500,
-  "estimated_cost_usd": 0.20,
-  "estimated_duration_seconds": 300,
-  "created_at":   "2025-01-15T10:30:00Z",
-  "websocket_url": "ws://localhost:8000/ws/jobs/550e8400-.../",
-  "status_url":    "/api/v1/jobs/550e8400-.../"
+  "domain": "healthcare",
+  "audience": "các bác sĩ, chuyên gia y tế và những người quan tâm đến công nghệ y khoa",
+  "tone": "professional",
+  "quality_mode": "standard",
+  "target_length": 1500,
+  "keywords": "AI y tế, chẩn đoán y khoa, công nghệ y học 2030",
+  "language": "Vietnamese",
+  "additional_instructions": "Hãy tập trung phân tích sâu vào các ví dụ thực tế về chẩn đoán hình ảnh X-quang và MRI.",
+  "outline_review_required": true
 }
 ```
+* **Chi tiết các thuộc tính đầu vào:**
+  * `title`, `topic` (Bắt buộc): Tiêu đề và nội dung chi tiết chủ đề.
+  * `content_type`: `blog_post` | `technical_report` | `news_article` | `tutorial`.
+  * `domain`: `tech` | `marketing` | `education` | `finance` | `healthcare` | `legal`.
+  * `tone`: `clear` | `professional` | `practical` | `executive` | `friendly` | `formal`.
+  * `quality_mode`: `fast` | `standard` | `strict`.
+  * `keywords`: Mảng các chuỗi hoặc chuỗi các từ khóa phân tách bằng dấu phẩy.
+  * `language`: Tên đầy đủ ngôn ngữ viết bài (ví dụ: `Vietnamese`, `English`, `French`).
+  * `outline_review_required`: `true` (dừng chờ người dùng sửa duyệt Outline) hoặc `false` (chạy tự động 100% đến hết).
 
----
-
-### GET /api/v1/jobs/
-**Danh sách jobs của user**
-
-**Query params:**
-- `status`: `pending | running | completed | failed`
-- `content_type`: filter by type
-- `ordering`: `created_at | -created_at | cost_usd | final_qa_score`
-- `page`, `page_size`
-
-**Response 200:**
+* **Phản hồi thành công (201 Created):**
 ```json
 {
-  "count": 42,
-  "next": "/api/v1/jobs/?page=2",
-  "results": [
-    {
-      "id":             "550e8400-...",
-      "topic":          "Benefits of Multi-Agent AI Systems",
-      "status":         "completed",
-      "content_type":   "blog_post",
-      "final_qa_score": 8.2,
-      "cost_usd":       0.34,
-      "duration_seconds": 287,
-      "created_at":     "2025-01-15T10:30:00Z",
-      "completed_at":   "2025-01-15T10:35:00Z"
-    }
-  ]
+  "id": "e0b57116-3677-4c7b-b5ad-61109a1ff00c",
+  "title": "Tương lai của AI trong Y tế",
+  "topic": "Những ứng dụng thực tế và triển vọng của trí tuệ nhân tạo (AI) trong chẩn đoán y khoa đến năm 2030.",
+  "content_type": "blog_post",
+  "domain": "healthcare",
+  "audience": "các bác sĩ, chuyên gia y tế và những người quan tâm đến công nghệ y khoa",
+  "tone": "professional",
+  "quality_mode": "standard",
+  "target_length": 1500,
+  "keywords": ["AI y tế", "chẩn đoán y khoa", "công nghệ y học 2030"],
+  "language": "Vietnamese",
+  "additional_instructions": "Hãy tập trung phân tích sâu vào các ví dụ thực tế về chẩn đoán hình ảnh X-quang và MRI.",
+  "outline_review_required": true,
+  "status": "running",
+  "celery_task_id": "84d728ea-92b0-4dbb-b2ab-92e1ee81b7a2",
+  "created_at": "2026-05-29T14:30:00.123456Z"
 }
 ```
 
 ---
 
-### GET /api/v1/jobs/{id}/
-**Chi tiết một job**
-
-**Response 200:**
-```json
-{
-  "id":             "550e8400-...",
-  "topic":          "Benefits of Multi-Agent AI Systems",
-  "audience":       "Tech professionals",
-  "tone":           "informative, authoritative",
-  "content_type":   "blog_post",
-  "target_words":   1500,
-  "status":         "completed",
-  "current_stage":  "completed",
-  "revision_count": 1,
-  
-  "metrics": {
-    "final_qa_score":    8.2,
-    "final_word_count":  1487,
-    "cost_usd":          0.34,
-    "total_tokens":      24500,
-    "duration_seconds":  287
-  },
-  
-  "agent_runs": [
-    {
-      "agent_name":    "research",
-      "status":        "completed",
-      "duration_ms":   68000,
-      "cost_usd":      0.003,
-      "tokens_used":   3200
-    },
-    ...
-  ],
-  
-  "revisions": [
-    {
-      "round":           1,
-      "qa_score_before": 6.9,
-      "qa_score_after":  8.2,
-      "approved":        true
-    }
-  ],
-  
-  "created_at":   "2025-01-15T10:30:00Z",
-  "completed_at": "2025-01-15T10:35:00Z"
-}
-```
-
----
-
-### GET /api/v1/jobs/{id}/output/
-**Lấy final output của job (chỉ khi status = completed)**
-
-**Query params:**
-- `format`: `json` (default) | `markdown` | `html`
-
-**Response 200 (json):**
-```json
-{
-  "job_id":     "550e8400-...",
-  "title":      "The Power of Multi-Agent AI Systems: A Complete Guide",
-  "content":    "# The Power of Multi-Agent AI Systems...\n\n...",
-  "word_count": 1487,
-  
-  "seo_metadata": {
-    "title_tag":          "Multi-Agent AI Systems: Benefits & How to Build (2025)",
-    "meta_description":   "Discover how multi-agent AI systems boost productivity...",
-    "focus_keyword":      "multi-agent AI systems",
-    "secondary_keywords": ["AI automation", "LangGraph"],
-    "readability_score":  67.2,
-    "readability_grade":  "8th-9th Grade"
-  },
-  
-  "quality": {
-    "qa_score":        8.2,
-    "fact_accuracy":   83.3,
-    "revision_rounds": 1
-  },
-  
-  "sources": [
-    { "url": "...", "title": "...", "credibility": 0.92 }
-  ],
-  
-  "cost_usd":          0.34,
-  "generated_at":      "2025-01-15T10:35:00Z"
-}
-```
-
----
-
-### GET /api/v1/jobs/{id}/export/
-**Export content sang file**
-
-**Query params:**
-- `format`: `markdown` | `html` | `docx`
-
-**Response:** File download (Content-Disposition: attachment)
-
----
-
-### DELETE /api/v1/jobs/{id}/
-**Xóa job và tất cả artifacts**
-
-Chỉ xóa được job của chính user.
-Running jobs không thể xóa (phải cancel trước).
-
----
-
-### POST /api/v1/jobs/{id}/cancel/
-**Hủy job đang chạy**
-
-```json
-{}  // Không cần body
-```
-
-**Response 200:**
-```json
-{ "status": "cancelled", "message": "Job cancelled successfully" }
-```
-
----
-
-## 4. Artifacts API
-
-### GET /api/v1/jobs/{id}/artifacts/
-**Danh sách tất cả artifacts của job (để debug pipeline)**
-
-```json
-{
-  "results": [
-    {
-      "id":            "...",
-      "artifact_type": "research_dossier",
-      "version":       1,
-      "word_count":    0,
-      "created_at":    "..."
-    },
-    {
-      "artifact_type": "outline",
-      "version":       1,
-      "word_count":    0
-    },
-    {
-      "artifact_type": "merged_draft",
-      "version":       1,
-      "word_count":    1534
-    },
-    {
-      "artifact_type": "edited_draft",
-      "version":       1,
-      "word_count":    1487
-    },
-    {
-      "artifact_type": "final",
-      "version":       1,
-      "word_count":    1487
-    }
-  ]
-}
-```
-
-### GET /api/v1/jobs/{id}/artifacts/{artifact_type}/
-**Chi tiết một artifact cụ thể**
-
-```json
-{
-  "artifact_type": "outline",
-  "version": 1,
-  "content": null,
-  "metadata": {
-    "title": "The Power of Multi-Agent AI Systems...",
-    "sections": [...]
-  },
-  "created_at": "..."
-}
-```
-
----
-
-## 5. Analytics API
-
-### GET /api/v1/analytics/summary/
-**Tổng quan statistics**
-
-```json
-{
-  "total_jobs":        142,
-  "completed_jobs":    128,
-  "failed_jobs":       14,
-  "avg_qa_score":      7.9,
-  "avg_cost_usd":      0.31,
-  "avg_duration_secs": 312,
-  "total_cost_usd":    44.02,
-  "total_words_generated": 192000
-}
-```
-
-### GET /api/v1/analytics/agents/
-**Performance breakdown by agent**
-
+### 3.2 GET `/api/jobs/` — Tải danh sách tất cả các Job
+* **Mô tả:** Trả về danh sách tóm tắt tất cả các Job đã được khởi tạo trong hệ thống.
+* **Phản hồi thành công (200 OK):**
 ```json
 [
   {
-    "agent_name":    "research",
-    "total_runs":    128,
-    "avg_duration_ms": 72000,
-    "avg_cost_usd":  0.003,
-    "failure_rate":  0.02
-  },
-  ...
+    "id": "e0b57116-3677-4c7b-b5ad-61109a1ff00c",
+    "title": "Tương lai của AI trong Y tế",
+    "topic": "Những ứng dụng...",
+    "content_type": "blog_post",
+    "domain": "healthcare",
+    "status": "completed",
+    "language": "Vietnamese",
+    "llm_calls_count": 18,
+    "created_at": "2026-05-29T14:30:00Z",
+    "completed_at": "2026-05-29T14:34:25Z"
+  }
 ]
 ```
 
 ---
 
-## 6. WebSocket — Real-time Progress
-
-### Connect
-
-```javascript
-const jobId = "550e8400-...";
-const token = "9944b09199c...";
-const ws = new WebSocket(`ws://localhost:8000/ws/jobs/${jobId}/?token=${token}`);
-```
-
-### Event Schema
-
-Tất cả events từ server:
-
-```json
-{
-  "type":      "agent_update",
-  "agent":     "research",
-  "status":    "completed",
-  "message":   "Found 15 sources, extracted 38 facts",
-  "progress":  20,
-  "timestamp": "2025-01-15T10:30:45Z",
-  "data": {}
-}
-```
-
-**`type` values:**
-
-| Type | Ý Nghĩa | Khi Nào |
-|------|---------|---------|
-| `pipeline_started` | Pipeline bắt đầu | Ngay sau khi Celery nhận task |
-| `agent_started` | Một agent bắt đầu chạy | Trước mỗi agent |
-| `agent_update` | Progress update giữa chừng | Trong quá trình agent chạy |
-| `agent_completed` | Một agent hoàn thành | Sau mỗi agent |
-| `agent_failed` | Một agent bị lỗi (đang retry) | Khi gặp lỗi |
-| `revision_started` | Bắt đầu revision round | Khi QA fail |
-| `job_completed` | Toàn bộ pipeline xong | Kết thúc |
-| `job_failed` | Pipeline thất bại | Khi lỗi không recover |
-
-### Progress Map
-
-```
-pipeline_started    →  0%
-research started    →  5%
-research completed  → 20%
-outline completed   → 28%
-writing started     → 30%
-writing completed   → 55%
-editing completed   → 65%
-seo completed       → 73%
-fact_check complete → 82%
-qa completed        → 90%
-compile completed   → 100%
-job_completed       → 100%
-```
-
-### Disconnect & Reconnect
-
-Client tự động reconnect nếu mất kết nối:
-
-```javascript
-ws.onclose = () => {
-  setTimeout(() => connectWebSocket(jobId), 3000);  // Reconnect sau 3s
-};
-```
-
-Khi reconnect, client gọi `GET /api/v1/jobs/{id}/` để sync lại state hiện tại.
+### 3.3 GET `/api/jobs/{id}/` — Tải thông tin chi tiết một Job
+* **Mô tả:** Trả về toàn bộ thông số cấu hình của Job kèm theo nhật ký chi tiết các lượt chạy của agent (`agent_runs`), các nháp bài viết sản sinh (`artifacts`), và lịch sử các lần sửa bài (`revisions`).
+* **Phản hồi thành công (200 OK):** Trả về đầy đủ thông tin chi tiết cấu trúc lồng nhau (xem chi tiết định nghĩa của `JobDetailSerializer` trong [apps/jobs/serializers.py](file:///d:/StudyDocument/DataPlatforms/Project/apps/jobs/serializers.py)).
 
 ---
 
-## 7. Error Responses
-
-### 400 Bad Request
+### 3.4 PATCH `/api/jobs/{id}/content/` — Sửa đổi thủ công nội dung bài viết nháp
+* **Mô tả:** Cập nhật nội dung văn bản thuần của bài viết nháp đã chỉnh sửa trực tiếp từ trình soạn thảo trên Web UI vào Artifact cuối cùng.
+* **Đầu vào mẫu (JSON):**
 ```json
 {
-  "error": "validation_error",
+  "content_text": "# Nội dung bài viết H1 đã chỉnh sửa bởi con người...\n\nĐoạn văn hoàn chỉnh..."
+}
+```
+* **Phản hồi thành công (200 OK):**
+```json
+{
+  "detail": "Content updated.",
+  "word_count": 1492
+}
+```
+
+---
+
+### 3.5 GET `/api/jobs/{id}/evidence/` — Lấy nguồn cào, ảnh và dàn ý hiện thời
+* **Mô tả:** Phục vụ giao diện hiển thị danh sách các nguồn tài liệu tham khảo cào được, ảnh tìm kiếm mở Wikimedia Commons, và hiển thị Outline đang chờ duyệt lên dashboard.
+* **Phản hồi thành công (200 OK):**
+```json
+{
+  "sources": [
+    { "title": "Báo cáo AI Y tế 2025", "url": "https://example.com/ai-health" }
+  ],
+  "images": [
+    { "title": "File:MRI Brain.jpg", "source_url": "https://commons.wikimedia.org/..." }
+  ],
+  "outline": [
+    {
+      "heading": "1. Giới thiệu tổng quan về AI trong Y tế",
+      "level": 1,
+      "brief": "Giới thiệu bối cảnh...",
+      "key_points": ["Tuyên bố thực tế 1", "Tuyên bố thực tế 2"],
+      "template_role": "introduction"
+    }
+  ]
+}
+```
+
+---
+
+### 3.6 POST `/api/jobs/{id}/outline/approve/` — Duyệt dàn ý và khôi phục viết bài
+* **Mô tả:** Gửi danh sách các phần dàn ý đã được duyệt (hoặc chỉnh sửa bởi người dùng) để khôi phục chạy tiếp pipeline đang tạm dừng (`paused`).
+* **Đầu vào mẫu (JSON):**
+```json
+{
+  "sections": [
+    {
+      "heading": "1. Đặt vấn đề và thực trạng AI y khoa",
+      "level": 1,
+      "brief": "Mô tả hook, vấn đề hiện tại...",
+      "key_points": ["MRI X-quang", "Quá tải y khoa"]
+    }
+  ]
+}
+```
+* **Phản hồi thành công (200 OK):**
+```json
+{
+  "detail": "Outline approved.",
+  "task_id": "9ac18db8-40e9-92c2-b13c-738cb23491f2",
+  "sections": [...]
+}
+```
+
+---
+
+### 3.7 POST `/api/jobs/{id}/sections/{section_id}/regenerate/` — Viết lại phần riêng biệt
+* **Mô tả:** Yêu cầu viết lại duy nhất một phần (section) cụ thể của bài viết sau khi job đã hoàn thành thành công dựa trên ghi chú hướng dẫn thêm của người dùng, giữ nguyên các phần còn lại.
+* **Đầu vào mẫu (JSON):**
+```json
+{
+  "instructions": "Hãy bổ sung thêm các số liệu thống kê cụ thể của bệnh viện Chợ Rẫy vào đoạn 2 nhé."
+}
+```
+* **Phản hồi thành công (200 OK):**
+```json
+{
+  "detail": "Section regeneration started.",
+  "task_id": "c138db90-84a2-921c-a90b-99f2e3c01bf8"
+}
+```
+
+---
+
+### 3.8 GET `/api/jobs/{id}/export/` — Xuất bài viết hoàn chỉnh ra file tải về
+* **Mô tả:** Tải về bài viết hoàn chỉnh chất lượng cao kèm tóm tắt metadata, nguồn tư liệu và danh sách ảnh bản quyền mở.
+* **Query Parameters:** `type` hoặc `format` = `markdown` | `html` | `docx`.
+* **Phản hồi thành công:** Trả về file nhị phân đính kèm dạng file download về máy khách.
+
+---
+
+### 3.9 GET `/api/jobs/{id}/artifacts/{artifact_type}/` — Lấy thông tin Artifact
+* **Mô tả:** Tải về thông tin tóm tắt và nội dung của một loại Artifact cụ thể trong Job.
+* **Tham số `artifact_type` hỗ trợ:** `research_summary` | `outline` | `draft` | `edited_draft` | `final_content` | `seo_metadata` | `qa_report` | `fact_check_report` | `source_documents` | `image_assets`.
+
+---
+
+### 3.10 POST `/api/jobs/{id}/cancel/` — Hủy bỏ Job đang thực thi
+* **Mô tả:** Chuyển trạng thái Job đang thực thi sang `cancelled` để ngăn ngừa các agents chạy tiếp tục.
+
+---
+
+## 4. API Thống Kê & Kiểm Tra Sức Khỏe (System APIs)
+
+### 4.1 GET `/api/analytics/` — Lấy dữ liệu thống kê bảng điều khiển
+* **Mô tả:** Trả về tổng lượng Job thực hiện, tỷ lệ thành công, điểm số QA trung bình, phân bổ cuộc gọi theo nhà cung cấp LLM, và lịch sử 20 Jobs hoàn thành gần nhất để vẽ biểu đồ Dashboard.
+
+---
+
+### 4.2 GET `/api/health/` — Kiểm tra sức khỏe dịch vụ hệ thống
+* **Mô tả:** Kiểm tra kết nối thời gian thực đến PostgreSQL (`db`), Redis cache (`redis`) và đếm số lượng Celery worker đang hoạt động (`worker`).
+* **Phản hồi thành công (200 OK - Khi hệ thống hoàn toàn khỏe mạnh):**
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-05-29T07:34:00Z",
+  "db": true,
+  "redis": true,
+  "worker": true,
+  "worker_count": 1
+}
+```
+* **Phản hồi khi lỗi (503 Service Unavailable):** Trả về mã lỗi 503 kèm thuộc tính trạng thái `degraded` nếu kết nối database hoặc redis bị mất.
+
+---
+
+## 5. Kết Nối Luồng WebSockets Thông Báo Thời Gian Thực
+
+### Kết nối WebSocket:
+```javascript
+const jobId = "e0b57116-3677-4c7b-b5ad-61109a1ff00c";
+const ws = new WebSocket(`ws://${window.location.host}/ws/jobs/${jobId}/`);
+```
+
+### Các sự kiện tiến trình chính gửi về phía máy khách (JSON):
+Khi các agent thực thi tiến trình chạy nền Celery, họ sẽ phát thông báo thời gian thực về browser dạng:
+```json
+{
+  "type": "progress",
+  "agent": "research",
+  "status": "completed",
   "detail": {
-    "target_words": ["Ensure this value is less than or equal to 5000."],
-    "tone": ["This field is required."]
+    "sources_count": 4,
+    "summary_chars": 2341
   }
 }
 ```
-
-### 402 Payment Required (Budget exceeded)
-```json
-{
-  "error": "budget_exceeded",
-  "detail": "Estimated cost $2.40 exceeds max_budget_usd $2.00",
-  "estimated_cost": 2.40,
-  "max_budget": 2.00
-}
-```
-
-### 404 Not Found
-```json
-{
-  "error": "not_found",
-  "detail": "No Job matches the given query."
-}
-```
-
-### 429 Too Many Requests
-```json
-{
-  "error": "throttled",
-  "detail": "Request was throttled. Expected available in 45 seconds.",
-  "retry_after": 45
-}
-```
-
-### 503 Service Unavailable (LLM API down)
-```json
-{
-  "error": "service_unavailable",
-  "detail": "LLM API is temporarily unavailable. Please retry in a few minutes."
-}
-```
-
----
-
-## 8. Rate Limiting
-
-| Endpoint | Limit |
-|----------|-------|
-| POST /jobs/ | 10 requests/hour per user |
-| GET /jobs/ | 60 requests/minute |
-| GET /jobs/{id}/ | 120 requests/minute |
-| GET /analytics/ | 30 requests/minute |
-
-Headers trả về:
-```http
-X-RateLimit-Limit: 10
-X-RateLimit-Remaining: 7
-X-RateLimit-Reset: 1705312800
-```
+Các trạng thái `status` chính bao gồm:
+* `running`: Agent bắt đầu được kích hoạt thực thi.
+* `completed`: Agent hoàn thành nhiệm vụ thành công.
+* `paused`: Tạm dừng ở Outline Agent để đợi người dùng duyệt dàn bài.

@@ -35,7 +35,7 @@ class ImageResearchAgent(BaseAgent):
             return state
 
         provider = getattr(settings, "IMAGE_SEARCH_PROVIDER", "wikimedia_commons").lower()
-        if provider not in {"wikimedia_commons", "commons"}:
+        if provider not in {"wikimedia_commons", "commons", "tavily"}:
             logger.warning("[ImageResearchAgent] Unsupported image provider: %s", provider)
             state.image_assets = []
             return state
@@ -44,9 +44,22 @@ class ImageResearchAgent(BaseAgent):
         assets: list[ImageAsset] = []
         for candidate in self._query_candidates(state):
             query = candidate
-            assets = self._search_commons(candidate, state)
+            if provider == "tavily":
+                assets = self._search_tavily(candidate, state)
+            else:
+                assets = self._search_commons(candidate, state)
             if assets:
                 break
+
+        # Automatically fall back to Tavily Image Search if Wikimedia returned no results and Tavily API key is available
+        if not assets and provider != "tavily" and getattr(settings, "TAVILY_API_KEY", ""):
+            logger.info("[ImageResearchAgent] Wikimedia Commons returned no results. Falling back to Tavily Image Search.")
+            for candidate in self._query_candidates(state):
+                query = candidate
+                assets = self._search_tavily(candidate, state)
+                if assets:
+                    break
+
         state.image_assets = assets[: self._max_images(state)]
 
         if state.image_assets:
@@ -78,13 +91,11 @@ class ImageResearchAgent(BaseAgent):
         topic = self._clean_query(state.topic)
         keywords = [self._clean_query(keyword) for keyword in state.keywords[:3]]
         keywords = [keyword for keyword in keywords if keyword]
-        domain_terms = self._clean_query(get_domain_search_terms(state.domain))
 
         raw_candidates = [
             " ".join([topic, *keywords[:1]]).strip(),
             topic,
             " ".join(keywords[:2]).strip(),
-            domain_terms,
             self._build_query(state),
         ]
 
@@ -102,15 +113,56 @@ class ImageResearchAgent(BaseAgent):
         terms = [state.topic]
         if state.keywords:
             terms.extend(state.keywords[:2])
-        domain_terms = get_domain_search_terms(state.domain).split()
-        if domain_terms:
-            terms.extend(domain_terms[:3])
         raw = " ".join(term for term in terms if term)
         return self._clean_query(raw)[:160]
 
     @staticmethod
     def _clean_query(value: str) -> str:
         return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    def _search_tavily(self, query: str, state: PipelineState) -> list[ImageAsset]:
+        if not query:
+            return []
+
+        api_key = getattr(settings, "TAVILY_API_KEY", "")
+        if not api_key:
+            logger.warning("[ImageResearchAgent] TAVILY_API_KEY not set - skipping Tavily image search.")
+            return []
+
+        try:
+            from tavily import TavilyClient
+            client = TavilyClient(api_key=api_key)
+            response = client.search(
+                query=query,
+                include_images=True,
+                max_results=max(3, self._max_images(state) * 2),
+            )
+            image_urls = response.get("images", [])
+            assets: list[ImageAsset] = []
+            for i, url in enumerate(image_urls):
+                if not url:
+                    continue
+                caption = self._caption_for_asset(f"Ảnh {i + 1}", state)
+                alt_text = f"Ảnh minh họa liên quan đến {state.topic}"
+                assets.append(
+                    ImageAsset(
+                        title=f"Ảnh {i + 1}",
+                        url=url,
+                        thumbnail_url=url,
+                        source_url=url,
+                        alt_text=alt_text[:180],
+                        caption=caption[:240],
+                        attribution="Web Search",
+                        license="Creative Commons / Fair Use via Web Search",
+                        provider="tavily",
+                        width=800,
+                        height=600,
+                    )
+                )
+            return assets
+        except Exception as exc:
+            logger.warning("[ImageResearchAgent] Tavily image search failed: %s", exc)
+            return []
 
     def _search_commons(self, query: str, state: PipelineState) -> list[ImageAsset]:
         if not query:
