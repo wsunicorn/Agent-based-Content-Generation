@@ -33,6 +33,10 @@ Trường quan trọng:
 | `llm_tokens_used` | PositiveIntegerField | Tổng token nếu provider trả về. |
 | `llm_usage_by_provider` | JSONField | Usage theo provider, ví dụ `{"ollama": {"calls": 10}}`. |
 
+`pipeline_state` là snapshot đầy đủ của `PipelineState`, không chỉ là trạng thái UI. Nó có thể chứa `sections`, `image_assets`, `sources`, `writer_tasks`, `section_drafts`, `qa_report`, `routing_issues`, `retry_counts` và `revision_events`. Trường này dùng cho resume sau outline review, regenerate section và debug job đã chạy.
+
+Lưu ý: `status="completed"` nghĩa là task đã kết thúc và có artifact cuối; không đồng nghĩa `qa_report.passed=true`. Nếu router hết revision budget, job có thể completed với cảnh báo chất lượng để user vẫn xem được nội dung tốt nhất hiện có.
+
 ## AgentRun
 
 `AgentRun` ghi log từng node/agent trong một job.
@@ -78,6 +82,28 @@ Trường quan trọng:
 | `version` | Phiên bản trong cùng job và artifact type. |
 | `created_at` | Thời điểm tạo. |
 
+`image_assets` lưu trong `content_json` dạng:
+
+```json
+{
+  "image_assets": [
+    {
+      "title": "Section visual",
+      "url": "https://.../image.jpg",
+      "thumbnail_url": "https://.../thumb.jpg",
+      "source_url": "https://.../source-page",
+      "alt_text": "Accessible alt text",
+      "caption": "Caption shown under the image",
+      "attribution": "Author/source",
+      "license": "License text",
+      "provider": "wikimedia_commons"
+    }
+  ]
+}
+```
+
+Ảnh không được writer dùng như evidence chữ. `JoinDraft` đọc `image_assets` để chèn markdown image block vào draft/final content.
+
 API lấy artifact mới nhất bằng:
 
 ```python
@@ -95,6 +121,8 @@ order_by("-version", "-created_at")
 | `reason` | Lý do sửa. |
 | `issues` | Danh sách issue cụ thể. |
 | `resolved` | Vòng sửa đã xử lý hay chưa. |
+
+Revision phản ánh quyết định router, không nhất thiết nghĩa là job thất bại. Trong `standard` mode, chỉ có một vòng revision tổng; nếu sau vòng đó QA vẫn còn issue, router có thể kết thúc bằng `fail_with_warning` và ghi nguyên nhân trong `routing_issues`.
 
 ## Quan Hệ
 

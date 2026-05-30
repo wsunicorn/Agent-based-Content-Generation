@@ -65,6 +65,30 @@ def test_image_research_queries_try_topic_and_keyword_before_domain_terms():
     assert candidates[-1] != candidates[0]
 
 
+def test_image_research_uses_outline_sections_for_dynamic_targets(settings):
+    settings.IMAGE_SEARCH_MAX_RESULTS = 2
+    state = PipelineState(
+        topic="Top 10 sports",
+        content_type="blog_post",
+        target_length=1500,
+        sections=[
+            OutlineSection(heading="Ranked sports list", level=1, brief="A", key_points=[]),
+            OutlineSection(heading="How to choose", level=1, brief="B", key_points=[]),
+            OutlineSection(heading="Training benefits", level=1, brief="C", key_points=[]),
+        ],
+    )
+
+    agent = ImageResearchAgent()
+
+    assert agent._max_images(state) == 4
+    assert [target["label"] for target in agent._image_targets(state)] == [
+        "Top 10 sports",
+        "Ranked sports list",
+        "How to choose",
+        "Training benefits",
+    ]
+
+
 def test_image_research_rejects_unreliable_social_hotlink_urls():
     agent = ImageResearchAgent()
 

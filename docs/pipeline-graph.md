@@ -1,5 +1,7 @@
 # Current LangGraph Pipeline
 
+Mermaid source in [pipeline-graph.mmd](./pipeline-graph.mmd) is the canonical graph. The checked-in SVG is a static preview.
+
 ![Current LangGraph Pipeline](./pipeline-graph.svg)
 
 ```mermaid
@@ -11,9 +13,9 @@ config:
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	coordinator(coordinator)
-	image_research(image_research)
 	research(research)
 	outline(outline)
+	image_research(image_research)
 	writer(writer)
 	section_writer(section_writer)
 	join_draft(join_draft)
@@ -26,13 +28,14 @@ graph TD;
 	__start__ --> coordinator;
 	editor --> coordinator_router;
 	fact_checker --> coordinator_router;
-	image_research --> research;
+	image_research --> writer;
 	join_draft --> editor;
-	outline --> writer;
+	outline --> image_research;
 	qa --> coordinator_router;
 	research --> outline;
 	section_writer --> join_draft;
 	seo --> coordinator_router;
+	coordinator -.-> research;
 	coordinator -.-> image_research;
 	coordinator -.-> writer;
 	writer -.-> section_writer;

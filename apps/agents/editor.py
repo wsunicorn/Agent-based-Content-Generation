@@ -79,6 +79,16 @@ class EditorAgent(BaseAgent):
         revised_draft, changes_made, needs_revision, revision_reason = (
             self._parse_response(text, draft)
         )
+        revised_word_count = len(revised_draft.split())
+        minimum_words = self._minimum_acceptable_words(state)
+        if minimum_words and revised_word_count < minimum_words:
+            needs_revision = True
+            revision_reason = (
+                f"Edited draft is too short ({revised_word_count} words). "
+                f"Expand toward the {state.target_length}-word target while preserving "
+                "the requested structure and all required items."
+            )
+            changes_made.append(revision_reason)
 
         state.edited_draft = revised_draft
         state.editor_changes = changes_made
@@ -155,6 +165,14 @@ class EditorAgent(BaseAgent):
                 revision_reason = re.sub(r"^YES\s*:?\s*", "", first_line, flags=re.I).strip()
 
         return revised_draft, changes_made, needs_revision, revision_reason
+
+    @staticmethod
+    def _minimum_acceptable_words(state: PipelineState) -> int:
+        if not state.target_length:
+            return 0
+        if state.quality_mode == "fast":
+            return 0
+        return max(300, int(state.target_length * 0.82))
 
     @staticmethod
     def _clean_revised_draft(text: str) -> str:

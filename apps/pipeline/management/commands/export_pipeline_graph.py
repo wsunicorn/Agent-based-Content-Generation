@@ -44,6 +44,8 @@ class Command(BaseCommand):
         svg_path.write_text(_draw_static_svg(), encoding="utf-8")
         markdown_path.write_text(
             "# Current LangGraph Pipeline\n\n"
+            "Mermaid source in [pipeline-graph.mmd](./pipeline-graph.mmd) is the canonical graph. "
+            "The checked-in SVG is a static preview.\n\n"
             "![Current LangGraph Pipeline](./pipeline-graph.svg)\n\n"
             "```mermaid\n"
             f"{mermaid}\n"
@@ -79,9 +81,9 @@ def _draw_static_svg() -> str:
     nodes = {
         "__start__": (60, 80, "START"),
         "coordinator": (210, 80, "Coordinator"),
-        "image_research": (360, 80, "Image Search"),
-        "research": (520, 80, "Research"),
-        "outline": (670, 80, "Outline"),
+        "research": (360, 80, "Research"),
+        "outline": (520, 80, "Outline"),
+        "image_research": (670, 80, "Image Search"),
         "writer": (820, 80, "Writer Plan"),
         "section_writer": (970, 80, "Section Writers"),
         "join_draft": (1130, 80, "Join Draft"),
@@ -94,10 +96,10 @@ def _draw_static_svg() -> str:
     }
     solid_edges = [
         ("__start__", "coordinator"),
-        ("coordinator", "image_research"),
-        ("image_research", "research"),
+        ("coordinator", "research"),
         ("research", "outline"),
-        ("outline", "writer"),
+        ("outline", "image_research"),
+        ("image_research", "writer"),
         ("section_writer", "join_draft"),
         ("join_draft", "editor"),
         ("editor", "coordinator_router"),

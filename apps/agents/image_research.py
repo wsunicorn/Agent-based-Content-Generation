@@ -52,27 +52,21 @@ class ImageResearchAgent(BaseAgent):
             state.image_assets = []
             return state
 
-        query = ""
-        assets: list[ImageAsset] = []
-        for candidate in self._query_candidates(state):
-            query = candidate
-            if provider == "tavily":
-                assets = self._search_tavily(candidate, state)
-            else:
-                assets = self._search_commons(candidate, state)
-            if assets:
-                break
+        assets = self._search_targets(provider, state)
 
-        if not assets and provider != "tavily" and getattr(settings, "TAVILY_API_KEY", ""):
+        if (
+            len(assets) < self._max_images(state)
+            and provider != "tavily"
+            and getattr(settings, "TAVILY_API_KEY", "")
+        ):
             logger.info(
-                "[ImageResearchAgent] Wikimedia Commons returned no results. "
-                "Falling back to Tavily Image Search."
+                "[ImageResearchAgent] Wikimedia Commons returned %d/%d image(s). "
+                "Filling remaining slots with Tavily Image Search.",
+                len(assets),
+                self._max_images(state),
             )
-            for candidate in self._query_candidates(state):
-                query = candidate
-                assets = self._search_tavily(candidate, state)
-                if assets:
-                    break
+            seen_urls = {asset.url for asset in assets}
+            assets.extend(self._search_targets("tavily", state, seen_urls=seen_urls))
 
         state.image_assets = assets[: self._max_images(state)]
 
@@ -95,11 +89,131 @@ class ImageResearchAgent(BaseAgent):
             state.sources = image_sources + non_image_sources
 
         logger.info(
-            "[ImageResearchAgent] Found %d image asset(s) for query=%s",
+            "[ImageResearchAgent] Found %d image asset(s) for %d target(s)",
             len(state.image_assets),
-            query,
+            len(self._image_targets(state)),
         )
         return state
+
+    def _search_targets(
+        self,
+        provider: str,
+        state: PipelineState,
+        seen_urls: set[str] | None = None,
+    ) -> list[ImageAsset]:
+        """Search one targeted visual per intro/body section before broad fill."""
+        max_images = self._max_images(state)
+        if max_images <= 0:
+            return []
+
+        assets: list[ImageAsset] = []
+        seen = set(seen_urls or set())
+        targets = self._image_targets(state)
+
+        for target in targets:
+            if len(assets) >= max_images:
+                break
+            found = self._search_first_match(provider, state, target, seen)
+            if found:
+                assets.append(found)
+                seen.add(found.url)
+
+        if len(assets) >= max_images:
+            return assets
+
+        for candidate in self._query_candidates(state):
+            if len(assets) >= max_images:
+                break
+            remaining = max_images - len(assets)
+            extra = self._search_provider(
+                provider,
+                candidate,
+                state,
+                limit=remaining,
+                target_label=state.topic,
+            )
+            for asset in extra:
+                if asset.url in seen:
+                    continue
+                assets.append(asset)
+                seen.add(asset.url)
+                if len(assets) >= max_images:
+                    break
+
+        return assets
+
+    def _search_first_match(
+        self,
+        provider: str,
+        state: PipelineState,
+        target: dict[str, str],
+        seen_urls: set[str],
+    ) -> ImageAsset | None:
+        for candidate in self._target_query_candidates(state, target):
+            found = self._search_provider(
+                provider,
+                candidate,
+                state,
+                limit=1,
+                target_label=target["label"],
+            )
+            for asset in found:
+                if asset.url not in seen_urls:
+                    return asset
+        return None
+
+    def _search_provider(
+        self,
+        provider: str,
+        query: str,
+        state: PipelineState,
+        *,
+        limit: int,
+        target_label: str = "",
+    ) -> list[ImageAsset]:
+        if provider == "tavily":
+            return self._search_tavily(query, state, limit=limit, target_label=target_label)
+        return self._search_commons(query, state, limit=limit, target_label=target_label)
+
+    def _image_targets(self, state: PipelineState) -> list[dict[str, str]]:
+        topic = self._clean_query(state.topic)
+        targets: list[dict[str, str]] = []
+        if topic:
+            targets.append({"label": topic, "query": self._build_query(state)})
+
+        for section in state.sections:
+            heading = self._clean_query(section.heading)
+            if not heading:
+                continue
+            key_points = self._clean_query(" ".join(section.key_points[:2]))
+            query = self._clean_query(" ".join(part for part in (topic, heading, key_points) if part))
+            targets.append({"label": heading, "query": query[:180]})
+
+        unique: list[dict[str, str]] = []
+        seen_labels: set[str] = set()
+        for target in targets:
+            label_key = target["label"].lower()
+            if label_key in seen_labels:
+                continue
+            seen_labels.add(label_key)
+            unique.append(target)
+        return unique[: self._max_images(state)]
+
+    def _target_query_candidates(self, state: PipelineState, target: dict[str, str]) -> list[str]:
+        candidates = [
+            target.get("query", ""),
+            " ".join([state.topic, target.get("label", "")]).strip(),
+            *self._query_candidates(state),
+        ]
+        unique: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            candidate = self._clean_query(candidate)
+            if not candidate or candidate.lower() in seen:
+                continue
+            seen.add(candidate.lower())
+            unique.append(candidate[:180])
+        return unique
 
     def _query_candidates(self, state: PipelineState) -> list[str]:
         topic = self._clean_query(state.topic)
@@ -135,7 +249,14 @@ class ImageResearchAgent(BaseAgent):
     def _clean_query(value: str) -> str:
         return re.sub(r"\s+", " ", str(value or "")).strip()
 
-    def _search_tavily(self, query: str, state: PipelineState) -> list[ImageAsset]:
+    def _search_tavily(
+        self,
+        query: str,
+        state: PipelineState,
+        *,
+        limit: int | None = None,
+        target_label: str = "",
+    ) -> list[ImageAsset]:
         if not query:
             return []
 
@@ -147,11 +268,12 @@ class ImageResearchAgent(BaseAgent):
         try:
             from tavily import TavilyClient
 
+            max_images = max(0, limit if limit is not None else self._max_images(state))
             client = TavilyClient(api_key=api_key)
             response = client.search(
                 query=query,
                 include_images=True,
-                max_results=max(3, self._max_images(state) * 3),
+                max_results=max(3, max_images * 3),
             )
             image_items = response.get("images", [])
             assets: list[ImageAsset] = []
@@ -165,16 +287,16 @@ class ImageResearchAgent(BaseAgent):
                     continue
 
                 index = len(assets) + 1
-                title = self._image_title(raw_item, index)
+                title = self._image_title(raw_item, index, fallback=target_label)
                 source_url = self._image_source_url(raw_item) or url
-                caption = self._caption_for_asset(title, state)
+                caption = self._caption_for_asset(title, state, target_label=target_label)
                 assets.append(
                     ImageAsset(
                         title=title,
                         url=url,
                         thumbnail_url=url,
                         source_url=source_url,
-                        alt_text=f"Image related to {state.topic}"[:180],
+                        alt_text=self._alt_text_for_asset(title, "", state, target_label=target_label)[:180],
                         caption=caption[:240],
                         attribution="Web Search",
                         license="Reusable web image; verify rights before publication",
@@ -183,7 +305,7 @@ class ImageResearchAgent(BaseAgent):
                         height=600,
                     )
                 )
-                if len(assets) >= self._max_images(state):
+                if len(assets) >= max_images:
                     break
             return assets
         except Exception as exc:
@@ -202,12 +324,14 @@ class ImageResearchAgent(BaseAgent):
         return ""
 
     @staticmethod
-    def _image_title(raw_item, index: int) -> str:
+    def _image_title(raw_item, index: int, fallback: str = "") -> str:
         if isinstance(raw_item, dict):
             for key in ("title", "alt", "description"):
                 value = str(raw_item.get(key) or "").strip()
                 if value:
                     return value[:180]
+        if fallback:
+            return fallback[:180]
         return f"Image {index}"
 
     @staticmethod
@@ -275,18 +399,26 @@ class ImageResearchAgent(BaseAgent):
         path = urlparse(str(response.url)).path.lower()
         return not content_type and path.endswith(ALLOWED_IMAGE_EXTENSIONS)
 
-    def _search_commons(self, query: str, state: PipelineState) -> list[ImageAsset]:
+    def _search_commons(
+        self,
+        query: str,
+        state: PipelineState,
+        *,
+        limit: int | None = None,
+        target_label: str = "",
+    ) -> list[ImageAsset]:
         if not query:
             return []
 
-        limit = max(self._max_images(state) * 3, 6)
+        max_images = max(0, limit if limit is not None else self._max_images(state))
+        search_limit = max(max_images * 3, 6)
         params = {
             "action": "query",
             "format": "json",
             "generator": "search",
             "gsrnamespace": "6",
             "gsrsearch": query,
-            "gsrlimit": limit,
+            "gsrlimit": search_limit,
             "prop": "imageinfo",
             "iiprop": "url|mime|size|extmetadata",
             "iiurlwidth": 1200,
@@ -313,16 +445,22 @@ class ImageResearchAgent(BaseAgent):
         assets: list[ImageAsset] = []
         seen_urls: set[str] = set()
         for page in pages.values():
-            asset = self._asset_from_page(page, state)
+            asset = self._asset_from_page(page, state, target_label=target_label)
             if not asset or asset.url in seen_urls:
                 continue
             seen_urls.add(asset.url)
             assets.append(asset)
-            if len(assets) >= self._max_images(state):
+            if len(assets) >= max_images:
                 break
         return assets
 
-    def _asset_from_page(self, page: dict, state: PipelineState) -> ImageAsset | None:
+    def _asset_from_page(
+        self,
+        page: dict,
+        state: PipelineState,
+        *,
+        target_label: str = "",
+    ) -> ImageAsset | None:
         image_info = (page.get("imageinfo") or [{}])[0]
         mime = image_info.get("mime", "")
         if not str(mime).startswith("image/"):
@@ -344,8 +482,8 @@ class ImageResearchAgent(BaseAgent):
         )
         source_url = image_info.get("descriptionurl", "")
 
-        caption = self._caption_for_asset(object_name, state)
-        alt_text = self._alt_text_for_asset(object_name, description, state)
+        caption = self._caption_for_asset(object_name, state, target_label=target_label)
+        alt_text = self._alt_text_for_asset(object_name, description, state, target_label=target_label)
 
         return ImageAsset(
             title=object_name[:180],
@@ -362,31 +500,55 @@ class ImageResearchAgent(BaseAgent):
         )
 
     @staticmethod
-    def _caption_for_asset(name: str, state: PipelineState) -> str:
-        topic = state.topic.strip()
+    def _caption_for_asset(name: str, state: PipelineState, target_label: str = "") -> str:
+        topic = (target_label or state.topic).strip()
         language = (getattr(state, "language", "") or "").lower()
         if "vietnam" in language or "viet" in language:
             if topic:
-                return f"Anh minh hoa lien quan den {topic}: {name}."
-            return f"Anh minh hoa: {name}."
+                return f"Ảnh minh họa cho {topic}: {name}."
+            return f"Ảnh minh họa: {name}."
         if topic:
             return f"Illustration related to {topic}: {name}."
         return f"Illustration: {name}."
 
     @staticmethod
-    def _alt_text_for_asset(name: str, description: str, state: PipelineState) -> str:
+    def _alt_text_for_asset(
+        name: str,
+        description: str,
+        state: PipelineState,
+        target_label: str = "",
+    ) -> str:
         text = description or name
         text = re.sub(r"\s+", " ", text).strip()
         if text:
             return text
-        return f"Image related to {state.topic}."
+        target = target_label or state.topic
+        return f"Image related to {target}."
 
     @staticmethod
     def _max_images(state: PipelineState) -> int:
         configured = max(0, getattr(settings, "IMAGE_SEARCH_MAX_RESULTS", 2))
+        if configured == 0:
+            return 0
         if state.quality_mode == "fast":
             return min(configured, 1)
-        return configured
+
+        section_count = len(getattr(state, "sections", []) or [])
+        if section_count:
+            desired = section_count + 1
+        else:
+            desired = {
+                "news_article": 2,
+                "blog_post": 3,
+                "tutorial": 4,
+                "technical_report": 4,
+            }.get(getattr(state, "content_type", ""), 3)
+
+        if getattr(state, "target_length", 0) >= 2200:
+            desired += 1
+        if getattr(state, "quality_mode", "") == "strict":
+            desired += 1
+        return min(max(configured, desired), 10)
 
 
 def markdown_for_image(asset: ImageAsset) -> str:

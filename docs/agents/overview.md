@@ -6,8 +6,8 @@ Agent code nằm trong `apps/agents/`. Mỗi agent nhận `PipelineState`, cập
 
 | Agent | File | Gọi LLM | Vai trò |
 | --- | --- | --- | --- |
-| Coordinator | [coordinator.py](../../apps/agents/coordinator.py) | Có | Chuẩn hóa metadata và router quyết định bước kế tiếp. |
-| ImageResearch | [image_research.py](../../apps/agents/image_research.py) | Không bắt buộc | Tìm ảnh Wikimedia/Tavily, lọc URL ảnh dễ hotlink hỏng, tạo `image_assets`. |
+| Coordinator | [coordinator.py](../../apps/agents/coordinator.py) | Không | Chuẩn hóa metadata và router quyết định bước kế tiếp. |
+| ImageResearch | [image_research.py](../../apps/agents/image_research.py) | Không | Tìm ảnh Wikimedia/Tavily theo topic và từng section, lọc URL ảnh dễ hotlink hỏng, tạo `image_assets`. |
 | Research | [research.py](../../apps/agents/research.py) | Có | Tìm nguồn, scrape và tóm tắt research. |
 | Outline | [outline.py](../../apps/agents/outline.py) | Có | Sinh outline structured theo content type/domain. |
 | Writer | [writer.py](../../apps/agents/writer.py) | Không | Chia outline thành các `SectionWriteTask`. |
@@ -49,6 +49,36 @@ Research luôn giữ topic của người dùng làm trung tâm khi tạo query 
 QA có topic-alignment gate: nếu bài không trả lời đúng topic, ví dụ topic ẩm thực nhưng nội dung trôi sang chiến lược marketing, QA sẽ yêu cầu `redo_outline` thay vì approve.
 
 ImageResearch ưu tiên URL ảnh direct và có thể fetch được. Các host social/CDN tạm như Facebook lookaside/fbcdn bị loại vì thường không hiển thị ổn định trong browser hoặc export.
+
+## Thứ Tự Chạy Và Lý Do
+
+Thứ tự chính là:
+
+```text
+Coordinator -> Research -> Outline -> ImageResearch -> Writer
+  -> SectionWriter* -> JoinDraft -> Editor -> Router
+  -> FactChecker / SEO / QA -> Router
+```
+
+Các quyết định đáng chú ý:
+
+- Research chạy trước Outline để dàn ý dựa trên evidence thay vì chỉ bám template.
+- Outline chạy trước ImageResearch để agent ảnh biết heading/key point từng section và có thể lấy ảnh đầy đủ hơn.
+- Writer chỉ lập kế hoạch, không gọi LLM. Phần viết thực tế nằm ở SectionWriter để có thể fan-out.
+- JoinDraft chịu trách nhiệm chèn ảnh, tránh để SectionWriter tự tạo markdown ảnh hoặc duplicate caption.
+- Router là node deterministic, đọc `qa_report`, `fact_check_report`, `seo_metadata`, `needs_revision` và budget revision để quyết định node tiếp theo.
+
+## Quality Gates
+
+QA kết hợp LLM scoring và rule deterministic:
+
+- completeness dựa trên `word_count / target_length`;
+- SEO dựa trên metadata có đủ title, description, slug, focus keyword;
+- topic alignment kiểm tra bài có bám topic user không;
+- listicle/top-N check đếm numbered item để tránh báo sai thiếu item khi bài đã có đủ danh sách;
+- fact quality issue lấy từ `unverified_claims`.
+
+Nếu `quality_mode=standard`, router chỉ cho một vòng revision tổng. Khi hết budget mà vẫn còn issue, pipeline có thể kết thúc bằng `fail_with_warning`: user vẫn xem được artifact tốt nhất hiện có, nhưng `qa_report.passed` có thể là `false` và `routing_issues` ghi nguyên nhân.
 
 ## AgentRun Logging
 

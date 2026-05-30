@@ -41,14 +41,14 @@ Body JSON:
   "title": "AI in education",
   "topic": "How AI changes classroom assessment",
   "content_type": "blog_post",
-  "domain": "food",
+  "domain": "education",
   "audience": "teachers",
   "tone": "practical",
   "quality_mode": "standard",
   "target_length": 1200,
-  "keywords": ["pho", "banh mi", "bun cha"],
-  "language": "Vietnamese",
-  "additional_instructions": "Nhớ kèm hình ảnh và mô tả hương vị từng món.",
+  "keywords": ["AI assessment", "classroom feedback"],
+  "language": "English",
+  "additional_instructions": "Include practical examples for teachers.",
   "outline_review_required": true
 }
 ```
@@ -58,6 +58,14 @@ Body JSON:
 `domain` hiện hỗ trợ: `general`, `food`, `tech`, `marketing`, `education`, `finance`, `healthcare`, `legal`. Dùng `general` khi topic phổ thông và `food` khi viết về món ăn/ẩm thực/lifestyle; tránh chọn `marketing` nếu người dùng không yêu cầu chiến lược thương hiệu, funnel, CAC hoặc LTV.
 
 Response `201` là `JobDetailSerializer`, gồm `id`, `status`, `celery_task_id`, artifacts rỗng ban đầu và metadata.
+
+`quality_mode` ảnh hưởng trực tiếp đến revision budget:
+
+- `fast`: ưu tiên tốc độ, ít kiểm tra/sửa;
+- `standard`: mặc định, cho một vòng revision tổng;
+- `strict`: dùng đầy đủ `MAX_PIPELINE_REVISIONS` và `MAX_AGENT_RETRIES`.
+
+Job có thể `completed` nhưng `qa_report.passed=false` nếu router đã hết revision budget và kết thúc với `fail_with_warning`. Khi debug chất lượng, luôn xem thêm `qa_report`, `revisions` và `pipeline_state.routing_issues`.
 
 ### `GET /api/jobs/{job_id}/`
 
@@ -127,6 +135,8 @@ Trả dữ liệu hỗ trợ dashboard:
   "outline": []
 }
 ```
+
+`images` lấy từ artifact `image_assets`. ImageResearch chạy sau outline nên ảnh thường bám topic và từng section. Nếu image provider trả ít kết quả hợp lệ, danh sách có thể ngắn hơn số section.
 
 ### `POST /api/jobs/{job_id}/outline/approve/`
 

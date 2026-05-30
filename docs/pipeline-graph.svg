@@ -22,8 +22,8 @@
 <line x1="1570" y1="230" x2="1370" y2="80" class="edge" marker-end="url(#arrow)" />
 <line x1="880" y1="80" x2="910" y2="80" class="edge dashed" marker-end="url(#arrow)" stroke-dasharray="7 6" />
 <line x1="880" y1="80" x2="1070" y2="80" class="edge dashed" marker-end="url(#arrow)" stroke-dasharray="7 6" />
+<path d="M 1430 108 C 1430 350, 360 350, 360 110" class="edge dashed" marker-end="url(#arrow)" />
 <path d="M 1430 108 C 1430 350, 520 350, 520 110" class="edge dashed" marker-end="url(#arrow)" />
-<path d="M 1430 108 C 1430 350, 670 350, 670 110" class="edge dashed" marker-end="url(#arrow)" />
 <path d="M 1430 108 C 1430 350, 820 350, 820 110" class="edge dashed" marker-end="url(#arrow)" />
 <path d="M 1430 108 C 1430 350, 1280 350, 1280 110" class="edge dashed" marker-end="url(#arrow)" />
 <line x1="1490" y1="80" x2="1130" y2="230" class="edge dashed" marker-end="url(#arrow)" stroke-dasharray="7 6" />
@@ -35,11 +35,11 @@
 <rect x="148" y="54" width="124" height="52" rx="10" class="node"/>
 <text x="210" y="80" class="label">Coordinator</text>
 <rect x="298" y="54" width="124" height="52" rx="10" class="node"/>
-<text x="360" y="80" class="label">Image Search</text>
+<text x="360" y="80" class="label">Research</text>
 <rect x="458" y="54" width="124" height="52" rx="10" class="node"/>
-<text x="520" y="80" class="label">Research</text>
+<text x="520" y="80" class="label">Outline</text>
 <rect x="608" y="54" width="124" height="52" rx="10" class="node"/>
-<text x="670" y="80" class="label">Outline</text>
+<text x="670" y="80" class="label">Image Search</text>
 <rect x="758" y="54" width="124" height="52" rx="10" class="node"/>
 <text x="820" y="80" class="label">Writer Plan</text>
 <rect x="908" y="54" width="124" height="52" rx="10" class="node"/>

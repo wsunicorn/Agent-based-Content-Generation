@@ -27,7 +27,7 @@ Django + DRF + Channels/Daphne
 Celery worker
   | runs LangGraph
   v
-Coordinator -> ImageResearch -> Research -> Outline -> Writer
+Coordinator -> Research -> Outline -> ImageResearch -> Writer
   -> SectionWriter* -> JoinDraft -> Editor -> Router
   -> FactChecker / SEO / QA -> Router -> Completed or Revision
 ```
@@ -39,8 +39,20 @@ Các điểm quan trọng:
 - Pipeline LangGraph nằm trong `apps/pipeline/graph.py`; state nằm trong `apps/pipeline/state.py`.
 - Celery task chính là `run_pipeline` trong `apps/jobs/tasks.py`.
 - Thành phần quan trọng nhất là PostgreSQL, Celery worker, LangGraph/PipelineState và LLM providers.
+- `Research` chạy trước `Outline` để dàn ý bám evidence; `ImageResearch` chạy sau `Outline` để lấy ảnh theo topic và từng section thay vì chỉ lấy ảnh chung chung.
+- `Writer` không gọi LLM; nó chỉ lập kế hoạch task. LLM prose chính nằm ở `SectionWriter`, sau đó `JoinDraft` ghép và chèn ảnh.
+- `QA` là quality gate cuối: vừa dùng LLM score, vừa có kiểm tra deterministic cho topic alignment, listicle/top-N, độ dài và fact-check warnings.
 - Local development dùng `config.settings.development`; production dùng `config.settings.production`.
 - `.env` bị ignore khỏi Git. Không commit API key, database password hoặc Django `SECRET_KEY`.
+
+## Thiết Kế Chính
+
+- Django/DRF được dùng làm control plane vì project cần admin, serializer, auth/session, template dashboard và export endpoint trong cùng backend.
+- Celery tách job dài khỏi HTTP request để user có thể đóng/mở dashboard mà pipeline vẫn chạy tiếp.
+- Redis vừa làm Celery broker vừa làm Channels layer, giảm số thành phần runtime cần vận hành trong local dev.
+- LangGraph phù hợp với pipeline nhiều bước có fan-out/fan-in và revision loop; toàn bộ node dùng chung `PipelineState` để resume và debug dễ hơn.
+- PostgreSQL là nguồn dữ liệu chính cho job/artifact/revision; SQLite chỉ là fallback local khi không set `DATABASE_URL`.
+- Ollama/Gemini/OpenAI-compatible provider được routing qua `BaseAgent` để có thể đổi model theo agent mà không đổi logic pipeline.
 
 ## Quick Start
 

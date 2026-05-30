@@ -59,7 +59,8 @@ class QAAgent(BaseAgent):
         seo_pts = self._seo_score_pts(state)                  # max 15
         topic_alignment_score, alignment_issues = self._topic_alignment(state, text)
         fact_quality_issues = self._fact_quality_issues(state)
-        blocking_issues = alignment_issues + fact_quality_issues
+        listicle_issues = self._listicle_structure_issues(state, text)
+        blocking_issues = alignment_issues + fact_quality_issues + listicle_issues
 
         if state.quality_mode == "fast" and not getattr(settings, "FAST_MODE_LLM_QA", False):
             llm_scores = self._fast_llm_scores(state, text)
@@ -71,6 +72,17 @@ class QAAgent(BaseAgent):
         format_adherence_score = llm_scores.format_adherence_score
         if alignment_issues:
             format_adherence_score = min(format_adherence_score, 7.0)
+        if listicle_issues:
+            format_adherence_score = min(format_adherence_score, 8.0)
+        else:
+            llm_scores.feedback = self._drop_false_listicle_feedback(
+                state,
+                llm_scores.feedback,
+            )
+            llm_scores.issues = self._drop_false_listicle_feedback(
+                state,
+                llm_scores.issues,
+            )
 
         total = (
             llm_scores.clarity_score
@@ -176,6 +188,71 @@ class QAAgent(BaseAgent):
         if len(state.unverified_claims or []) >= 5:
             return ["Too many factual claims remain unverified for automatic approval."]
         return []
+
+    @classmethod
+    def _listicle_structure_issues(cls, state: PipelineState, text: str) -> list[str]:
+        requested = cls._requested_list_count(state)
+        if not requested:
+            return []
+        numbered_items = len(re.findall(r"^\s*\d+[\.)]\s+", text or "", flags=re.M))
+        if numbered_items >= requested:
+            return []
+        return [
+            f"Listicle topic is under-covered: found {numbered_items} numbered item(s), "
+            f"but the topic asks for {requested}."
+        ]
+
+    @classmethod
+    def _drop_false_listicle_feedback(
+        cls,
+        state: PipelineState,
+        feedback: list[str],
+    ) -> list[str]:
+        requested = cls._requested_list_count(state)
+        if not requested:
+            return feedback
+        patterns = (
+            "khong du",
+            "chua du",
+            "chi liet ke",
+            "not enough",
+            "fewer than",
+            "only lists",
+            "only includes",
+        )
+        cleaned = []
+        for item in feedback or []:
+            normalised = cls._normalise_text(item)
+            if any(pattern in normalised for pattern in patterns) and str(requested) in normalised:
+                continue
+            cleaned.append(item)
+        return cleaned
+
+    @classmethod
+    def _requested_list_count(cls, state: PipelineState) -> int:
+        normalised = cls._normalise_text(state.topic)
+        match = re.search(r"\btop\s*(\d+)\b|\b(\d+)\s+", normalised)
+        if not match:
+            return 0
+        value = next((part for part in match.groups() if part), "")
+        if not value:
+            return 0
+        count = int(value)
+        if count < 3 or count > 50:
+            return 0
+        list_markers = (
+            "top",
+            "danh sach",
+            "xep hang",
+            "pho bien",
+            "ua chuong",
+            "best",
+            "most popular",
+            "rank",
+        )
+        if not any(marker in normalised for marker in list_markers):
+            return 0
+        return count
 
     # ------------------------------------------------------------------ #
     # Topic alignment checks                                              #

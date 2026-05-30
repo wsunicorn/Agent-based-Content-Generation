@@ -38,3 +38,26 @@ def test_qa_flags_food_article_that_drifts_into_marketing_strategy():
     assert score >= 0
     assert any("Food-discovery topic is under-covered" in issue for issue in issues)
     assert any("drifts into marketing" in issue for issue in issues)
+
+
+def test_qa_listicle_check_counts_numbered_items_deterministically():
+    state = PipelineState(topic="Top 10 sports in the world")
+    complete_text = "\n".join(f"{idx}. Sport {idx}" for idx in range(1, 11))
+    short_text = "\n".join(f"{idx}. Sport {idx}" for idx in range(1, 8))
+
+    assert QAAgent._listicle_structure_issues(state, complete_text) == []
+    assert "found 7 numbered item" in QAAgent._listicle_structure_issues(state, short_text)[0]
+
+
+def test_qa_drops_false_listicle_count_feedback_when_count_is_present():
+    state = PipelineState(topic="Top 10 sports in the world")
+
+    feedback = QAAgent._drop_false_listicle_feedback(
+        state,
+        [
+            "Not enough 10 items in the ranked list.",
+            "Add more practical examples.",
+        ],
+    )
+
+    assert feedback == ["Add more practical examples."]

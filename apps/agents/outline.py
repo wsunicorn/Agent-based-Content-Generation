@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -95,6 +97,7 @@ class OutlineAgent(BaseAgent):
             f"Content type guide:\n{content_type_guide}\n\n"
             f"Domain guide:\n{get_domain_guide_text(state.domain, state.audience, state.tone)}\n\n"
             f"Outline blueprint:\n{get_outline_blueprint(state.content_type, target_sections)}\n\n"
+            f"{self._listicle_instruction(state)}\n"
             f"Research summary:\n{state.research_summary}\n\n"
             f"Additional instructions: {state.additional_instructions or 'None'}\n\n"
             f"Generate exactly {target_sections} sections for the article body "
@@ -147,3 +150,30 @@ class OutlineAgent(BaseAgent):
         except Exception as exc:
             logger.error("[OutlineAgent] Fallback parse failed: %s", exc)
             return []
+
+    @staticmethod
+    def _listicle_instruction(state: PipelineState) -> str:
+        topic = _normalise_for_detection(state.topic)
+        if not re.search(
+            r"\btop\s*\d+|\btop\b|danh sach|xep hang|pho bien nhat|ua chuong nhat|"
+            r"duoc ua chuong|best|most popular|ranked|ranking",
+            topic,
+        ):
+            return ""
+
+        count_match = re.search(r"\btop\s*(\d+)|\b(\d+)\s+", topic)
+        requested_count = next((part for part in count_match.groups() if part), "") if count_match else ""
+        count_text = requested_count or "all requested"
+        return (
+            "Listicle/ranking requirement:\n"
+            f"- The topic asks for a ranked/list article. Do not narrow the outline to only one item.\n"
+            f"- Include a body section whose explicit purpose is to cover the complete top {count_text} list.\n"
+            "- Key points for that section must tell the writer to include every ranked item, not just examples.\n"
+            "- Other body sections may cover selection criteria, comparison, how to choose, or takeaways.\n\n"
+        )
+
+
+def _normalise_for_detection(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r"\s+", " ", text).lower().strip()

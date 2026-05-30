@@ -78,7 +78,15 @@ OLLAMA_STRUCTURED_MODEL=qwen2.5:7b
 ENABLE_WEB_SEARCH=True
 TAVILY_API_KEY=your-tavily-api-key-here
 GOOGLE_API_KEY=your-google-api-key-here
+
+IMAGE_SEARCH_ENABLED=True
+IMAGE_SEARCH_PROVIDER=wikimedia_commons
+IMAGE_SEARCH_MAX_RESULTS=2
+MAX_PARALLEL_WRITERS=2
+PIPELINE_QUALITY_MODE=standard
 ```
+
+`IMAGE_SEARCH_MAX_RESULTS` là mức ảnh tối thiểu. Runtime hiện có thể tăng số ảnh theo số section/content type, tối đa 10 ảnh, để ảnh phủ được nhiều phần của bài hơn.
 
 Lưu ý bảo mật:
 

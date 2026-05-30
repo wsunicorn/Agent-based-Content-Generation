@@ -155,9 +155,18 @@
     ══════════════════════════════════════════════════ */
     .top-row {
       display: grid;
-      grid-template-columns: 400px 1fr;
+      grid-template-columns: 400px minmax(0, 1fr);
       gap: 24px;
+      align-items: stretch;
     }
+    .top-row > .card {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+    }
+    .top-row > .card:first-child { align-self: start; }
+    .top-row > .card > .card-body { flex: 1 1 auto; }
     @media (max-width: 840px) { .top-row { grid-template-columns: 1fr; } }
 
     /* ══════════════════════════════════════════════════
@@ -345,6 +354,36 @@
     .log-error   { color: var(--red); }
     .log-info    { color: var(--text-3); }
     .log-accent  { color: var(--accent); }
+
+    .pipeline-card { min-height: 0; }
+    .pipeline-body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: visible;
+    }
+    .pipeline-body .pipeline-track,
+    .pipeline-body .progress-wrap,
+    .pipeline-body .mini-panel {
+      flex: 0 0 auto;
+    }
+    .pipeline-body .mini-panel {
+      margin-top: 12px;
+      max-height: none;
+      overflow: visible;
+    }
+    .pipeline-body .terminal {
+      flex: 1 1 260px;
+      min-height: 220px;
+      max-height: none;
+    }
+    @media (max-width: 840px) {
+      .pipeline-body .terminal {
+        flex: 0 0 auto;
+        min-height: 260px;
+        max-height: 420px;
+      }
+    }
 
     /* ══════════════════════════════════════════════════
        Result section — large, clear
@@ -844,7 +883,7 @@
     </div>
 
     <!-- Pipeline progress -->
-    <div class="card">
+    <div class="card pipeline-card">
       <div class="card-head">
         <div class="card-head-icon icon-blue">◈</div>
         <span class="card-head-title">Pipeline</span>
@@ -853,7 +892,7 @@
           <span id="status-badge" class="status-pill pill-idle">IDLE</span>
         </div>
       </div>
-      <div class="card-body" style="display:flex;flex-direction:column;">
+      <div class="card-body pipeline-body">
         <div class="pipeline-track" id="pipeline-track"></div>
         <div class="progress-wrap">
           <div id="progress-fill" class="progress-fill animated" style="width:0%"></div>
@@ -1056,10 +1095,10 @@
 ───────────────────────────────────────────────────────────────────────── */
 const AGENTS = [
   { id:'coordinator', icon:'🎯', label:'Coord'   },
-  { id:'image_research', icon:'🖼', label:'Images' },
   { id:'research',    icon:'🔍', label:'Research' },
   { id:'outline',     icon:'📐', label:'Outline'  },
   { id:'outline_review', icon:'✋', label:'Review' },
+  { id:'image_research', icon:'🖼', label:'Images' },
   { id:'writer',      icon:'🧭', label:'Plan'     },
   { id:'section_writer', icon:'✍️', label:'Sections' },
   { id:'join_draft',  icon:'🧩', label:'Join'     },

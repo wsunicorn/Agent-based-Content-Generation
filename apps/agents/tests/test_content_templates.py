@@ -5,6 +5,7 @@ from apps.agents.content_guides import (
     get_intro_heading,
     get_outline_blueprint,
 )
+from apps.agents.outline import OutlineAgent
 from apps.agents.writer import WriterAgent
 from apps.pipeline.state import OutlineSection, PipelineState, SourceDocument
 
@@ -33,6 +34,15 @@ def test_outline_blueprints_push_different_article_shapes():
     assert "Limitations" in report_blueprint
     assert "Prerequisites" in tutorial_blueprint
     assert "Troubleshooting" in tutorial_blueprint
+
+
+def test_outline_agent_adds_listicle_guardrails_for_top_topics():
+    state = PipelineState(topic="TOP 10 MÔN THỂ THAO ĐƯỢC ƯA CHUỘNG NHẤT HIỆN NAY")
+
+    instruction = OutlineAgent._listicle_instruction(state)
+
+    assert "Do not narrow the outline to only one item" in instruction
+    assert "top 10 list" in instruction
 
 
 def test_writer_planner_uses_template_specific_intro_and_conclusion():

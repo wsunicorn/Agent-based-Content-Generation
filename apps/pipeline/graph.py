@@ -1,7 +1,7 @@
 """LangGraph StateGraph definition for the content generation pipeline.
 
 Phase 2 uses a map-reduce writer stage:
-    outline -> writer planner -> section_writer[] -> join_draft -> editor
+    research -> outline -> image_research -> writer planner -> section_writer[] -> join_draft -> editor
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import dataclasses
 import logging
 from typing import Annotated, Any, TypedDict
 
+from django.conf import settings
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
@@ -300,8 +301,10 @@ def _send_writer_tasks(state: dict[str, Any]) -> list[Send]:
 
 def _route_after_coordinator(state: dict[str, Any]) -> str:
     if state.get("outline_approved") and state.get("sections"):
+        if getattr(settings, "IMAGE_SEARCH_ENABLED", True) and not state.get("image_assets"):
+            return "image_research"
         return "writer"
-    return "image_research"
+    return "research"
 
 
 def _route_after_coordinator_router(state: dict[str, Any]) -> str:
@@ -334,9 +337,9 @@ def build_pipeline_graph() -> StateGraph:
     graph = StateGraph(PipelineGraphState)
 
     graph.add_node("coordinator", _make_node(CoordinatorAgent))
-    graph.add_node("image_research", _make_node(ImageResearchAgent))
     graph.add_node("research", _make_node(ResearchAgent))
     graph.add_node("outline", _make_node(OutlineAgent))
+    graph.add_node("image_research", _make_node(ImageResearchAgent))
     graph.add_node("writer", _make_node(WriterAgent))
     graph.add_node("section_writer", _section_writer_node)
     graph.add_node("join_draft", _join_draft_node)
@@ -351,13 +354,14 @@ def build_pipeline_graph() -> StateGraph:
         "coordinator",
         _route_after_coordinator,
         {
+            "research": "research",
             "image_research": "image_research",
             "writer": "writer",
         },
     )
-    graph.add_edge("image_research", "research")
     graph.add_edge("research", "outline")
-    graph.add_edge("outline", "writer")
+    graph.add_edge("outline", "image_research")
+    graph.add_edge("image_research", "writer")
     graph.add_conditional_edges("writer", _send_writer_tasks, ["section_writer", "join_draft"])
     graph.add_edge("section_writer", "join_draft")
     graph.add_edge("join_draft", "editor")
